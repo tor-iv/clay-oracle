@@ -30,10 +30,18 @@ function createDb() {
       archetype_id TEXT   NOT NULL,
       reading     TEXT    NOT NULL,
       name        TEXT,
+      playlist_url TEXT,
       created_at  INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS pots_created_at_idx ON pots (created_at);
   `);
+
+  // Migration for DBs created before playlist_url existed (ignore if present).
+  try {
+    sqlite.exec("ALTER TABLE pots ADD COLUMN playlist_url TEXT");
+  } catch {
+    // column already exists — fine
+  }
 
   return drizzle(sqlite, { schema });
 }

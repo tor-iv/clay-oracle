@@ -13,6 +13,7 @@ export const pots = sqliteTable(
     archetype_id: text("archetype_id").notNull(),
     reading:     text("reading").notNull(),
     name:        text("name"),
+    playlist_url: text("playlist_url"), // optional Spotify embed override
     created_at:  integer("created_at").notNull(),
   },
   (table) => [

@@ -10,7 +10,7 @@ import HandInput from "@/components/ui/HandInput";
 import InkButton from "@/components/ui/InkButton";
 import DoodleIcon from "@/components/ui/DoodleIcon";
 import ShareButton from "@/components/ShareButton";
-import { nameOnShelfAction } from "@/actions/pot";
+import { nameOnShelfAction, setPlaylistAction } from "@/actions/pot";
 
 // ── Metadata ───────────────────────────────────────────────────────────────
 
@@ -70,6 +70,7 @@ export default async function ResultPage({
 
   const archetype = ARCHETYPES.find((a) => a.id === pot.archetype_id) ?? ARCHETYPES[0];
   const nameAction = nameOnShelfAction.bind(null, id);
+  const playlistAction = setPlaylistAction.bind(null, id);
 
   return (
     <main
@@ -177,19 +178,35 @@ export default async function ResultPage({
           </p>
         </WobblyCard>
 
-        {/* ── Spotify playlist ──────────────────────────────────────── */}
-        <div className="mb-6 overflow-hidden rounded-xl" style={{ border: "2px solid var(--color-clay-ink)" }}>
+        {/* ── Spotify playlist (custom override, else archetype default) ── */}
+        <div className="mb-3 overflow-hidden rounded-xl" style={{ border: "2px solid var(--color-clay-ink)" }}>
           <iframe
-            src={`https://open.spotify.com/embed/playlist/${archetype.playlistId}?utm_source=oembed`}
+            src={`https://open.spotify.com/embed/${
+              pot.playlist_url ?? `playlist/${archetype.playlistId}`
+            }?utm_source=oembed`}
             width="100%"
             height="152"
             frameBorder={0}
             allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
             loading="lazy"
             style={{ display: "block", borderRadius: 10 }}
-            title={`${archetype.name} playlist`}
+            title={pot.playlist_url ? "your soundtrack" : `${archetype.name} playlist`}
           />
         </div>
+
+        {/* Set your own soundtrack */}
+        <form action={playlistAction} className="mb-6 flex flex-col gap-2 sm:flex-row">
+          <HandInput
+            name="playlist"
+            placeholder="🎵 paste a Spotify link to set your own soundtrack"
+            defaultValue=""
+            className="flex-1"
+            style={{ fontSize: "0.95rem" }}
+          />
+          <InkButton type="submit" variant="soft" className="shrink-0">
+            {pot.playlist_url ? "change song" : "set song"}
+          </InkButton>
+        </form>
 
         {/* ── Sign or shelf link ────────────────────────────────────── */}
         <WobblyCard tone="cream" className="mb-6">

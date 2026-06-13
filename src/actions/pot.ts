@@ -119,3 +119,48 @@ export async function nameOnShelfAction(
   revalidatePath("/shelf");
   revalidatePath(`/result/${potId}`);
 }
+
+// ── setPlaylistAction ────────────────────────────────────────────────────────
+
+/**
+ * Parse a pasted Spotify share link into a safe embed path, e.g.
+ * "https://open.spotify.com/playlist/37i9...?si=abc" → "playlist/37i9...".
+ * Accepts playlist | album | track | artist; strips locale prefix + query.
+ * Returns null for anything that isn't a real open.spotify.com link.
+ */
+export function parseSpotifyEmbedPath(raw: string): string | null {
+  const url = raw.trim();
+  // type/id directly from a spotify.com URL (optional /intl-xx/ locale prefix)
+  const m = url.match(
+    /open\.spotify\.com\/(?:intl-[a-z]{2}\/)?(playlist|album|track|artist)\/([A-Za-z0-9]+)/i
+  );
+  if (!m) return null;
+  return `${m[1].toLowerCase()}/${m[2]}`;
+}
+
+/**
+ * Set (or clear) a pot's custom Spotify soundtrack, overriding the archetype
+ * default on the result page. Stores only a sanitised embed path, never a raw
+ * iframe/URL — so no arbitrary embeds can be injected.
+ */
+export async function setPlaylistAction(
+  potId: string,
+  formData: FormData
+): Promise<void> {
+  const raw = String(formData.get("playlist") ?? "").trim();
+  // Empty input clears the override (back to the archetype default).
+  const embedPath = raw ? parseSpotifyEmbedPath(raw) : null;
+  // A non-empty but invalid link is ignored (leaves the current value).
+  if (raw && !embedPath) {
+    revalidatePath(`/result/${potId}`);
+    return;
+  }
+
+  await db
+    .update(schema.pots)
+    .set({ playlist_url: embedPath })
+    .where(eq(schema.pots.id, potId));
+
+  revalidatePath(`/result/${potId}`);
+  revalidatePath("/shelf");
+}
