@@ -1,0 +1,19 @@
+services:
+  clay-oracle-app:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - oracledata:/app/data
+    environment:
+      DB_PATH: /app/data/oracle.db
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+
+networks:
+  default:
+    name: claydate_default
+    external: true
+
+volumes:
+  oracledata:

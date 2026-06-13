@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Clay Oracle
 
-## Getting Started
+Throw a pot. Receive a personality reading. Get a playlist.
 
-First, run the development server:
+Clay Oracle divines your inner self from the shape, glaze, and decoration of the vessel you build — then hands you a bespoke reading and a soundtrack to match. Backed by a DeepSeek LLM (or warm canned blurbs when the key is absent), a SQLite shelf of past pots, and a lot of affection for the craft.
+
+---
+
+## Local dev
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm dev          # starts on :3478
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3478](http://localhost:3478).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+No API key needed — the app falls back to archetype blurbs automatically when `DEEPSEEK_API_KEY` is not set.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## Environment variables
 
-To learn more about Next.js, take a look at the following resources:
+| Variable | Default | Notes |
+|---|---|---|
+| `DB_PATH` | `./data/oracle.db` | SQLite database path; directory is created on startup |
+| `DEEPSEEK_API_KEY` | *(unset)* | Optional. Without it, readings use canned archetype blurbs |
+| `LLM_BASE_URL` | `https://api.deepseek.com` | Override to use a compatible proxy |
+| `LLM_MODEL` | `deepseek-chat` | Any DeepSeek-compatible model name |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Deploy
 
-## Deploy on Vercel
+Clay Oracle runs as a Docker container on the shared Hetzner box alongside ClayDate, reachable at **oracle.claydate.nyc** via ClayDate's existing Caddy reverse proxy.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The service joins the `claydate_default` Docker network so Caddy can reach it by the hostname `clay-oracle-app` on port 3000. No ports are published directly.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Required GitHub secrets
+
+| Secret | Value |
+|---|---|
+| `HETZNER_IP` | Public IPv4 of the server (same as ClayDate) |
+| `SSH_PRIVATE_KEY` | Private key for root access (same as ClayDate) |
+| `SSH_HOST_FINGERPRINT` | SHA256 host key fingerprint (same as ClayDate) |
+
+Push to `main` triggers an SSH deploy: `git pull` → `docker compose up -d --build` → `docker image prune -f`.
+
+On the server the repo lives at `/opt/clay-oracle`.
+
+### First-time server setup
+
+```bash
+cd /opt
+git clone <repo-url> clay-oracle
+cd clay-oracle
+# Optionally create /opt/clay-oracle/.env with DEEPSEEK_API_KEY=sk-...
+docker compose up -d --build
+```
+
+The `oracledata` volume persists the SQLite database across deploys.

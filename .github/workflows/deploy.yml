@@ -1,0 +1,31 @@
+# Deploy to Hetzner on push to main.
+# This workflow is a no-op (fails harmlessly) until these repository secrets
+# are configured in Settings → Secrets and variables → Actions:
+#   HETZNER_IP           — public IPv4 of the server (shared with ClayDate)
+#   SSH_PRIVATE_KEY      — private key whose public half is in the server's authorized_keys
+#   SSH_HOST_FINGERPRINT — SHA256 host key fingerprint (ssh-keyscan + ssh-keygen -lf)
+#                          pins the server identity so a MITM can't intercept the deploy
+
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fingerprint: ${{ secrets.SSH_HOST_FINGERPRINT }}
+          script: |
+            cd /opt/clay-oracle
+            git pull origin main
+            docker compose up -d --build
+            docker image prune -f
