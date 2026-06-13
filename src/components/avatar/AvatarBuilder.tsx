@@ -863,18 +863,6 @@ function FacePicker({
         </div>
       )}
 
-      {/* Global all-round / all-straight buttons */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2 }}>
-        <span
-          style={{
-            fontFamily: "var(--font-hand)",
-            fontSize: "0.75rem",
-            color: "var(--color-clay-ink-muted)",
-          }}
-        >
-          all sections:
-        </span>
-      </div>
     </div>
   );
 }
