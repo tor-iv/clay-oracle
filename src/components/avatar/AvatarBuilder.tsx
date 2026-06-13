@@ -217,6 +217,7 @@ function WheelVasePreview({
     startWidths: number[];
     activeBandIndex: number;
     relYAtDown: number;
+    hasDragged: boolean;
   }>({
     active: false,
     startX: 0,
@@ -225,11 +226,13 @@ function WheelVasePreview({
     startWidths: widths.slice(),
     activeBandIndex: 0,
     relYAtDown: 0.5,
+    hasDragged: false,
   });
   const [hoveredBandIndex, setHoveredBandIndex] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const PREVIEW_SIZE = 300;
+  const TAP_THRESHOLD = 6; // pixels — move less than this = tap, not drag
 
   function getRelativePos(e: PointerEvent | React.PointerEvent): {
     relX: number;
@@ -266,8 +269,9 @@ function WheelVasePreview({
       startWidths: widths.slice(),
       activeBandIndex,
       relYAtDown: relY,
+      hasDragged: false,
     };
-    setIsDragging(true);
+    // Don't set isDragging immediately — wait until we know it's a real drag
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -277,9 +281,21 @@ function WheelVasePreview({
       return;
     }
 
+    const totalDx = e.clientX - dragRef.current.startX;
+    const totalDy = e.clientY - dragRef.current.startY;
+    const totalDist = Math.sqrt(totalDx * totalDx + totalDy * totalDy);
+
+    // Promote to drag once threshold exceeded
+    if (!dragRef.current.hasDragged && totalDist > TAP_THRESHOLD) {
+      dragRef.current.hasDragged = true;
+      setIsDragging(true);
+    }
+
+    if (!dragRef.current.hasDragged) return;
+
     e.preventDefault();
-    const dy = e.clientY - dragRef.current.startY;
-    const dx = e.clientX - dragRef.current.startX;
+    const dy = totalDy;
+    const dx = totalDx;
 
     const vSens = 1 / PREVIEW_SIZE;
     const hSens = 1 / PREVIEW_SIZE;
@@ -288,7 +304,6 @@ function WheelVasePreview({
     const newH = Math.max(0, Math.min(1, dragRef.current.startH + hDelta));
 
     const wDelta = dx * hSens * 1.6;
-    const bi = dragRef.current.activeBandIndex;
     const newWidths = dragRef.current.startWidths.slice();
 
     const prevBands = bandsForHeight(dragRef.current.startH);
@@ -320,8 +335,27 @@ function WheelVasePreview({
     }
   }
 
-  function handlePointerUp() {
+  function handlePointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragRef.current.active) return;
+
+    if (!dragRef.current.hasDragged) {
+      // It was a tap — toggle the edge of the band under the pointer
+      const { relY } = getRelativePos(e);
+      const n = widths.length;
+      const bandIdx = bandIndexForRelY(relY, n);
+      const next = edges.slice();
+      next[bandIdx] = next[bandIdx] > 0.5 ? 0 : 1;
+      onEdgesChange(next);
+    }
+
     dragRef.current.active = false;
+    dragRef.current.hasDragged = false;
+    setIsDragging(false);
+  }
+
+  function handlePointerCancel() {
+    dragRef.current.active = false;
+    dragRef.current.hasDragged = false;
     setIsDragging(false);
   }
 
@@ -335,25 +369,22 @@ function WheelVasePreview({
   const N = widths.length;
   const shapeStr = encodeThrown2Shape(h, widths, face as FaceId, edges);
 
+  // For the hover highlight: which band is under the cursor, and what will tap do?
+  const showHoverHint = !isDragging && hoveredBandIndex !== null;
+  const hoverEdgeIsRound = hoveredBandIndex !== null ? (edges[hoveredBandIndex] ?? 0) < 0.5 : true;
+  const tapLabel = hoverEdgeIsRound ? "tap: → straight ◇" : "tap: → round ◠";
+
   return (
     <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
-      {/* Wheel assembly row: edge toggles left, vase center */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
-        {/* Per-section edge toggle column */}
-        <EdgeToggleColumn
-          edges={edges}
-          onEdgesChange={onEdgesChange}
-          n={N}
-          previewSize={PREVIEW_SIZE}
-        />
-
+      {/* Wheel assembly row: vase center only (no side column) */}
+      <div style={{ display: "flex", alignItems: "flex-start" }}>
         {/* Pottery wheel sculpting area */}
         <div
           ref={containerRef}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
           onPointerLeave={handlePointerLeave}
           style={{
             width: PREVIEW_SIZE,
@@ -367,9 +398,32 @@ function WheelVasePreview({
             justifyContent: "center",
           }}
           role="img"
-          aria-label="Drag to sculpt your vase"
+          aria-label="Drag to sculpt your vase; tap a section to toggle round or straight edge"
         >
-          {/* Per-band dashed boundary lines + handle dots */}
+          {/* Band highlight overlay: faint translucent band under hover/press */}
+          {showHoverHint && hoveredBandIndex !== null && (
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: `${((N - 1 - hoveredBandIndex) / N) * 100}%`,
+                height: `${(1 / N) * 100}%`,
+                background: hoverEdgeIsRound
+                  ? "rgba(74,123,175,0.13)"
+                  : "rgba(168,197,160,0.16)",
+                border: hoverEdgeIsRound
+                  ? "1px dashed rgba(74,123,175,0.35)"
+                  : "1px dashed rgba(122,140,110,0.45)",
+                borderRadius: 4,
+                pointerEvents: "none",
+                zIndex: 6,
+                transition: "top 0.08s ease, background 0.1s ease",
+              }}
+            />
+          )}
+
+          {/* Per-band dashed boundary lines */}
           {!isDragging && (
             <svg
               style={{
@@ -404,20 +458,6 @@ function WheelVasePreview({
                   </g>
                 );
               })}
-              {hoveredBandIndex !== null && (() => {
-                const bandFromTop = N - 1 - hoveredBandIndex;
-                const centerFrac = (bandFromTop + 0.5) / N;
-                const cy = centerFrac * PREVIEW_SIZE;
-                return (
-                  <circle
-                    cx={PREVIEW_SIZE / 2}
-                    cy={cy}
-                    r={5}
-                    fill="#B85C2A"
-                    opacity={0.5}
-                  />
-                );
-              })()}
             </svg>
           )}
 
@@ -486,34 +526,40 @@ function WheelVasePreview({
             {N} bands
           </div>
 
-          {/* Zone hint */}
-          {!isDragging && hoveredBandIndex !== null && (
+          {/* Tap hint tooltip: shows what a tap will do on the hovered band */}
+          {showHoverHint && hoveredBandIndex !== null && (
             <div
               style={{
                 position: "absolute",
-                left: 0,
-                right: 0,
+                left: "50%",
+                transform: "translateX(-50%)",
                 top: `${((N - 1 - hoveredBandIndex + 0.5) / N) * 100}%`,
+                marginTop: -14,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 pointerEvents: "none",
-                zIndex: 10,
+                zIndex: 12,
               }}
             >
               <span
                 style={{
                   fontFamily: "var(--font-hand)",
-                  fontSize: "0.72rem",
-                  color: "#B85C2A",
-                  background: "rgba(245,240,232,0.9)",
-                  border: "1px dashed #B85C2A",
-                  borderRadius: 4,
-                  padding: "1px 7px",
+                  fontSize: "0.7rem",
+                  color: hoverEdgeIsRound ? "#2A5C8A" : "#3A6B32",
+                  background: hoverEdgeIsRound
+                    ? "rgba(220,235,248,0.95)"
+                    : "rgba(218,238,215,0.95)",
+                  border: hoverEdgeIsRound
+                    ? "1px dashed rgba(74,123,175,0.6)"
+                    : "1px dashed rgba(100,155,95,0.6)",
+                  borderRadius: 5,
+                  padding: "2px 8px",
                   whiteSpace: "nowrap",
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
                 }}
               >
-                ← band {hoveredBandIndex + 1} →
+                {tapLabel}
               </span>
             </div>
           )}
@@ -560,7 +606,7 @@ function WheelVasePreview({
         </svg>
       </div>
 
-      {/* Drag hint */}
+      {/* Hint text */}
       <p
         style={{
           fontFamily: "var(--font-hand)",
@@ -572,7 +618,7 @@ function WheelVasePreview({
           transition: "opacity 0.15s",
         }}
       >
-        {isDragging ? "shaping…" : "↕ height  ↔ band width  ◠◇ edge style"}
+        {isDragging ? "shaping…" : "↕ height  ↔ band width  tap section: ◠↔◇"}
       </p>
     </div>
   );
