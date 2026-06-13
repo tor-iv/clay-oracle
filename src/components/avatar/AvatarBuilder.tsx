@@ -58,11 +58,6 @@ const WHEEL_STYLE = `
   50%  { opacity: 0.7; }
   100% { opacity: 0.4; }
 }
-@keyframes bandPop {
-  0%   { transform: scaleX(1); }
-  40%  { transform: scaleX(1.06); }
-  100% { transform: scaleX(1); }
-}
 `;
 
 // Default per-band edges (all round)
@@ -81,7 +76,9 @@ function randomThrown2Params(): {
   const h = 0.2 + Math.random() * 0.8;
   const n = bandsForHeight(h);
   const widths = Array.from({ length: n }, () => 0.2 + Math.random() * 0.8);
-  const edges  = Array.from({ length: n }, () => Math.random() < 0.3 ? Math.random() : 0);
+  // Whole-pot edge: uniform — either all round or all angular
+  const edgeVal = Math.random() < 0.3 ? 1 : 0;
+  const edges = Array(n).fill(edgeVal);
 
   // Glaze: sometimes a preset, sometimes a random hex
   let glaze: string;
@@ -112,74 +109,81 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-// ── Per-section edge toggles ──────────────────────────────────────────────
+// ── WholePotEdgeToggle ────────────────────────────────────────────────────
+// Single whole-pot rounded vs angular control.
 
-function EdgeToggleColumn({
+function WholePotEdgeToggle({
   edges,
   onEdgesChange,
-  n,
-  previewSize,
 }: {
   edges: number[];
   onEdgesChange: (edges: number[]) => void;
-  n: number;
-  previewSize: number;
 }) {
-  function toggle(i: number) {
-    const next = edges.slice();
-    next[i] = next[i] > 0.5 ? 0 : 1;
-    onEdgesChange(next);
+  const isRounded = edges.every((e) => e < 0.5);
+
+  function setAll(val: number) {
+    onEdgesChange(Array(edges.length).fill(val));
   }
 
   return (
     <div
       style={{
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-around",
-        height: previewSize,
-        width: 28,
-        padding: "4px 0",
-        gap: 2,
+        display: "inline-flex",
+        borderRadius: 10,
+        overflow: "hidden",
+        border: "1.5px solid rgba(44,24,16,0.22)",
+        background: "rgba(232,213,176,0.25)",
       }}
     >
-      {/* Bands rendered top=lip(N-1) to bottom=foot(0) */}
-      {Array.from({ length: n }, (_, i) => {
-        const bandIdx = n - 1 - i; // top → bottom visual order
-        const isRound = edges[bandIdx] < 0.5;
-        return (
-          <button
-            key={bandIdx}
-            type="button"
-            title={`Band ${bandIdx + 1}: ${isRound ? "round" : "straight"}`}
-            aria-label={`Band ${bandIdx + 1} edge: ${isRound ? "round" : "straight"}`}
-            onClick={() => toggle(bandIdx)}
-            style={{
-              width: 24,
-              height: Math.floor(previewSize / n) - 3,
-              minHeight: 14,
-              borderRadius: isRound ? "50% 50% 40% 40%" : 4,
-              background: isRound
-                ? "rgba(168,197,160,0.55)"
-                : "rgba(74,123,175,0.45)",
-              border: isRound
-                ? "1.5px solid rgba(122,140,110,0.7)"
-                : "1.5px solid rgba(74,123,175,0.7)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 0,
-              fontSize: "0.6rem",
-              color: "#2C1810",
-              transition: "all 0.12s ease",
-              lineHeight: 1,
-            }}
-          >
-            {isRound ? "◠" : "◇"}
-          </button>
-        );
-      })}
+      <button
+        type="button"
+        onClick={() => setAll(0)}
+        aria-pressed={isRounded}
+        title="Rounded silhouette"
+        style={{
+          fontFamily: "var(--font-hand)",
+          fontSize: "0.82rem",
+          color: isRounded ? "#3A6B32" : "#5C3D2E",
+          background: isRounded
+            ? "rgba(168,197,160,0.65)"
+            : "transparent",
+          border: "none",
+          borderRight: "1px solid rgba(44,24,16,0.15)",
+          padding: "5px 14px",
+          cursor: "pointer",
+          fontWeight: isRounded ? 700 : 400,
+          transition: "background 0.12s, color 0.12s, font-weight 0.1s",
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+        }}
+      >
+        <span style={{ fontSize: "0.95rem" }}>◠</span> rounded
+      </button>
+      <button
+        type="button"
+        onClick={() => setAll(1)}
+        aria-pressed={!isRounded}
+        title="Angular silhouette"
+        style={{
+          fontFamily: "var(--font-hand)",
+          fontSize: "0.82rem",
+          color: !isRounded ? "#2A5C8A" : "#5C3D2E",
+          background: !isRounded
+            ? "rgba(74,123,175,0.3)"
+            : "transparent",
+          border: "none",
+          padding: "5px 14px",
+          cursor: "pointer",
+          fontWeight: !isRounded ? 700 : 400,
+          transition: "background 0.12s, color 0.12s, font-weight 0.1s",
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+        }}
+      >
+        <span style={{ fontSize: "0.95rem" }}>◇</span> angular
+      </button>
     </div>
   );
 }
@@ -229,13 +233,12 @@ function WheelVasePreview({
     relYAtDown: 0.5,
     hasDragged: false,
   });
-  const [hoveredBandIndex, setHoveredBandIndex] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const PREVIEW_SIZE = 300;
-  const TAP_THRESHOLD = 6; // pixels — move less than this = tap, not drag
+  const DRAG_THRESHOLD = 4; // pixels — must move at least this far to count as a drag
 
-  function getRelativePos(e: PointerEvent | React.PointerEvent): {
+  function getRelativePos(e: React.PointerEvent): {
     relX: number;
     relY: number;
   } {
@@ -272,22 +275,16 @@ function WheelVasePreview({
       relYAtDown: relY,
       hasDragged: false,
     };
-    // Don't set isDragging immediately — wait until we know it's a real drag
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!dragRef.current.active) {
-      const { relY } = getRelativePos(e);
-      setHoveredBandIndex(bandIndexForRelY(relY, widths.length));
-      return;
-    }
+    if (!dragRef.current.active) return;
 
     const totalDx = e.clientX - dragRef.current.startX;
     const totalDy = e.clientY - dragRef.current.startY;
     const totalDist = Math.sqrt(totalDx * totalDx + totalDy * totalDy);
 
-    // Promote to drag once threshold exceeded
-    if (!dragRef.current.hasDragged && totalDist > TAP_THRESHOLD) {
+    if (!dragRef.current.hasDragged && totalDist > DRAG_THRESHOLD) {
       dragRef.current.hasDragged = true;
       setIsDragging(true);
     }
@@ -313,7 +310,9 @@ function WheelVasePreview({
     let adjustedEdges: number[];
     if (newBands !== prevBands) {
       adjustedWidths = resampleWidths(newWidths, newBands);
-      adjustedEdges  = resampleWidths(edges, newBands);
+      // Keep uniform edge value when resampling
+      const edgeVal = edges[0] ?? 0;
+      adjustedEdges = Array(newBands).fill(edgeVal);
     } else {
       adjustedWidths = newWidths;
       adjustedEdges  = edges;
@@ -336,19 +335,9 @@ function WheelVasePreview({
     }
   }
 
-  function handlePointerUp(e: React.PointerEvent<HTMLDivElement>) {
+  function handlePointerUp() {
     if (!dragRef.current.active) return;
-
-    if (!dragRef.current.hasDragged) {
-      // It was a tap — toggle the edge of the band under the pointer
-      const { relY } = getRelativePos(e);
-      const n = widths.length;
-      const bandIdx = bandIndexForRelY(relY, n);
-      const next = edges.slice();
-      next[bandIdx] = next[bandIdx] > 0.5 ? 0 : 1;
-      onEdgesChange(next);
-    }
-
+    // Tapping does nothing special — just end the gesture
     dragRef.current.active = false;
     dragRef.current.hasDragged = false;
     setIsDragging(false);
@@ -360,24 +349,12 @@ function WheelVasePreview({
     setIsDragging(false);
   }
 
-  function handlePointerLeave() {
-    setHoveredBandIndex(null);
-    if (!dragRef.current.active) {
-      setIsDragging(false);
-    }
-  }
-
   const N = widths.length;
   const shapeStr = encodeThrown2Shape(h, widths, face as FaceId, edges);
 
-  // For the hover highlight: which band is under the cursor, and what will tap do?
-  const showHoverHint = !isDragging && hoveredBandIndex !== null;
-  const hoverEdgeIsRound = hoveredBandIndex !== null ? (edges[hoveredBandIndex] ?? 0) < 0.5 : true;
-  const tapLabel = hoverEdgeIsRound ? "tap: → straight ◇" : "tap: → round ◠";
-
   return (
     <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
-      {/* Wheel assembly row: vase center only (no side column) */}
+      {/* Wheel assembly row: vase center only */}
       <div style={{ display: "flex", alignItems: "flex-start" }}>
         {/* Pottery wheel sculpting area */}
         <div
@@ -386,7 +363,6 @@ function WheelVasePreview({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
-          onPointerLeave={handlePointerLeave}
           style={{
             width: PREVIEW_SIZE,
             height: PREVIEW_SIZE,
@@ -399,69 +375,8 @@ function WheelVasePreview({
             justifyContent: "center",
           }}
           role="img"
-          aria-label="Drag to sculpt your vase; tap a section to toggle round or straight edge"
+          aria-label="Drag to sculpt your vase"
         >
-          {/* Band highlight overlay: faint translucent band under hover/press */}
-          {showHoverHint && hoveredBandIndex !== null && (
-            <div
-              style={{
-                position: "absolute",
-                left: 0,
-                right: 0,
-                top: `${((N - 1 - hoveredBandIndex) / N) * 100}%`,
-                height: `${(1 / N) * 100}%`,
-                background: hoverEdgeIsRound
-                  ? "rgba(74,123,175,0.13)"
-                  : "rgba(168,197,160,0.16)",
-                border: hoverEdgeIsRound
-                  ? "1px dashed rgba(74,123,175,0.35)"
-                  : "1px dashed rgba(122,140,110,0.45)",
-                borderRadius: 4,
-                pointerEvents: "none",
-                zIndex: 6,
-                transition: "top 0.08s ease, background 0.1s ease",
-              }}
-            />
-          )}
-
-          {/* Per-band dashed boundary lines */}
-          {!isDragging && (
-            <svg
-              style={{
-                position: "absolute",
-                inset: 0,
-                pointerEvents: "none",
-                zIndex: 5,
-              }}
-              width={PREVIEW_SIZE}
-              height={PREVIEW_SIZE}
-              viewBox={`0 0 ${PREVIEW_SIZE} ${PREVIEW_SIZE}`}
-              fill="none"
-            >
-              {Array.from({ length: N - 1 }, (_, i) => {
-                const fracFromTop = (i + 1) / N;
-                const yPos = fracFromTop * PREVIEW_SIZE;
-                const bandIdxFromBottom = N - 1 - i;
-                const isHovered = hoveredBandIndex === bandIdxFromBottom || hoveredBandIndex === bandIdxFromBottom - 1;
-                return (
-                  <g key={i}>
-                    <line
-                      x1="10"
-                      y1={yPos}
-                      x2={PREVIEW_SIZE - 10}
-                      y2={yPos}
-                      stroke="#B85C2A"
-                      strokeWidth="0.8"
-                      strokeDasharray="3 5"
-                      opacity={isHovered ? 0.7 : 0.25}
-                      style={{ transition: "opacity 0.15s ease" }}
-                    />
-                  </g>
-                );
-              })}
-            </svg>
-          )}
-
           {/* Vase avatar */}
           <div style={{ position: "relative", zIndex: 2 }}>
             <VaseAvatar
@@ -526,44 +441,6 @@ function WheelVasePreview({
           >
             {N} bands
           </div>
-
-          {/* Tap hint tooltip: shows what a tap will do on the hovered band */}
-          {showHoverHint && hoveredBandIndex !== null && (
-            <div
-              style={{
-                position: "absolute",
-                left: "50%",
-                transform: "translateX(-50%)",
-                top: `${((N - 1 - hoveredBandIndex + 0.5) / N) * 100}%`,
-                marginTop: -14,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                pointerEvents: "none",
-                zIndex: 12,
-              }}
-            >
-              <span
-                style={{
-                  fontFamily: "var(--font-hand)",
-                  fontSize: "0.7rem",
-                  color: hoverEdgeIsRound ? "#2A5C8A" : "#3A6B32",
-                  background: hoverEdgeIsRound
-                    ? "rgba(220,235,248,0.95)"
-                    : "rgba(218,238,215,0.95)",
-                  border: hoverEdgeIsRound
-                    ? "1px dashed rgba(74,123,175,0.6)"
-                    : "1px dashed rgba(100,155,95,0.6)",
-                  borderRadius: 5,
-                  padding: "2px 8px",
-                  whiteSpace: "nowrap",
-                  boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-                }}
-              >
-                {tapLabel}
-              </span>
-            </div>
-          )}
         </div>
       </div>
 
@@ -619,7 +496,7 @@ function WheelVasePreview({
           transition: "opacity 0.15s",
         }}
       >
-        {isDragging ? "shaping…" : "↕ height  ↔ band width  tap section: ◠↔◇"}
+        {isDragging ? "shaping…" : "↕ height  ↔ band width"}
       </p>
     </div>
   );
@@ -1177,14 +1054,16 @@ export default function AvatarBuilder({
   const [classicShape, setClassicShape] = useState<string>(defaultShape as string);
   const [classicOpen, setClassicOpen] = useState(false);
 
-  // Handle height changes — resampling widths AND edges if band count changes
+  // Handle height changes — resampling widths AND edges if band count changes.
+  // Edges stay uniform: keep the same single value for all bands.
   function handleHeightChange(newH: number) {
     const prevBands = bandsForHeight(thrown2H);
     const newBands = bandsForHeight(newH);
     setThrown2H(newH);
     if (newBands !== prevBands) {
       setThrown2Widths((prev) => resampleWidths(prev, newBands));
-      setEdges((prev) => resampleWidths(prev.map((v) => v), newBands));
+      // Preserve the whole-pot edge value (all bands equal)
+      setEdges((prev) => Array(newBands).fill(prev[0] ?? 0));
     }
   }
 
@@ -1193,11 +1072,9 @@ export default function AvatarBuilder({
   }
 
   function handleEdgesChange(newEdges: number[]) {
-    setEdges(newEdges);
-  }
-
-  function setAllEdges(val: number) {
-    setEdges(Array(thrown2Widths.length).fill(val));
+    // Always keep the whole-pot edge uniform: use the value from index 0
+    const val = newEdges[0] ?? 0;
+    setEdges(Array(newEdges.length).fill(val > 0.5 ? 1 : 0));
   }
 
   const shapeValue = mode === "throw"
@@ -1257,44 +1134,8 @@ export default function AvatarBuilder({
             onEdgesChange={handleEdgesChange}
           />
 
-          {/* Global edge quick-set */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-            <span style={{ fontFamily: "var(--font-hand)", fontSize: "0.78rem", color: "var(--color-clay-ink-muted)" }}>
-              all sections:
-            </span>
-            <button
-              type="button"
-              onClick={() => setAllEdges(0)}
-              style={{
-                fontFamily: "var(--font-hand)",
-                fontSize: "0.8rem",
-                color: "#5C3D2E",
-                background: "rgba(168,197,160,0.35)",
-                border: "1.5px solid rgba(122,140,110,0.5)",
-                borderRadius: 8,
-                padding: "3px 12px",
-                cursor: "pointer",
-              }}
-            >
-              ◠ all round
-            </button>
-            <button
-              type="button"
-              onClick={() => setAllEdges(1)}
-              style={{
-                fontFamily: "var(--font-hand)",
-                fontSize: "0.8rem",
-                color: "#5C3D2E",
-                background: "rgba(74,123,175,0.2)",
-                border: "1.5px solid rgba(74,123,175,0.4)",
-                borderRadius: 8,
-                padding: "3px 12px",
-                cursor: "pointer",
-              }}
-            >
-              ◇ all straight
-            </button>
-          </div>
+          {/* Whole-pot edge style */}
+          <WholePotEdgeToggle edges={edges} onEdgesChange={handleEdgesChange} />
 
           {/* Action buttons */}
           <div className="flex gap-2 flex-wrap justify-center">

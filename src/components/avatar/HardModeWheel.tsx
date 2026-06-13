@@ -848,13 +848,9 @@ function FinishFormStage({ h, widths: initialWidths, onComplete }: FinishFormSta
   const liveShape = encodeThrown2Shape(h, displayWidths, "none", edges);
   const livePath = buildThrown2Path(h, displayWidths, edges);
 
-  function setEdgeStyle(style: "round" | "straight" | "mixed") {
+  function setEdgeStyle(style: "round" | "straight") {
     if (style === "round") setEdges(Array(N).fill(0));
-    else if (style === "straight") setEdges(Array(N).fill(1));
-    else {
-      // Mixed: alternate round/straight
-      setEdges(Array.from({ length: N }, (_, i) => (i % 2 === 0 ? 0 : 0.85)));
-    }
+    else setEdges(Array(N).fill(1));
   }
 
   return (
@@ -896,28 +892,35 @@ function FinishFormStage({ h, widths: initialWidths, onComplete }: FinishFormSta
       <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center" }}>
         <span style={{ fontFamily: "var(--font-hand)", fontSize: "0.88rem", color: "rgba(232,213,176,0.7)" }}>edge style</span>
         <div style={{ display: "flex", gap: 10 }}>
-          {(["round", "straight", "mixed"] as const).map((style) => (
-            <button
-              key={style}
-              type="button"
-              onClick={() => setEdgeStyle(style)}
-              style={{
-                fontFamily: "var(--font-hand)",
-                fontSize: "0.85rem",
-                color: "#F5F0E8",
-                background: "rgba(184,92,42,0.15)",
-                border: "1.5px solid rgba(184,92,42,0.4)",
-                borderRadius: 8,
-                padding: "5px 14px",
-                cursor: "pointer",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(184,92,42,0.35)"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(184,92,42,0.15)"; }}
-            >
-              {style === "round" ? "◠ round" : style === "straight" ? "◇ crisp" : "◈ mixed"}
-            </button>
-          ))}
+          {(["round", "straight"] as const).map((style) => {
+            const isActive = style === "round"
+              ? edges.every((e) => e < 0.5)
+              : edges.every((e) => e >= 0.5);
+            return (
+              <button
+                key={style}
+                type="button"
+                onClick={() => setEdgeStyle(style)}
+                aria-pressed={isActive}
+                style={{
+                  fontFamily: "var(--font-hand)",
+                  fontSize: "0.85rem",
+                  color: "#F5F0E8",
+                  background: isActive ? "rgba(184,92,42,0.45)" : "rgba(184,92,42,0.15)",
+                  border: isActive ? "1.5px solid rgba(184,92,42,0.85)" : "1.5px solid rgba(184,92,42,0.4)",
+                  borderRadius: 8,
+                  padding: "5px 14px",
+                  cursor: "pointer",
+                  transition: "background 0.12s, border-color 0.12s",
+                  fontWeight: isActive ? 700 : 400,
+                }}
+                onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "rgba(184,92,42,0.35)"; }}
+                onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "rgba(184,92,42,0.15)"; }}
+              >
+                {style === "round" ? "◠ rounded" : "◇ angular"}
+              </button>
+            );
+          })}
         </div>
       </div>
 

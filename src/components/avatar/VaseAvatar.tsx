@@ -250,21 +250,42 @@ function getFacePosition(
   if (kind === "thrown2" && thrown2) {
     const { h, widths } = thrown2;
     // Use the actual lip/foot ys from the path builder helpers
-    const lipY = thrown2LipY(h);    // h=0 → 36, h=1 → 4
-    const footY = THROWN2_FOOT_Y;  // 57
-    // Place face near the widest band in the upper portion
+    const lipY = thrown2LipY(h);   // h=0 → 36, h=1 → 4
+    const footY = THROWN2_FOOT_Y; // 57
+
     const N = widths.length;
-    const upperThirdEnd = Math.ceil(N * 0.67);
+
+    // Place face near the visual center of the body (40–60% height range)
+    // Find widest band in the middle 40–75% range for a natural centering
+    const loBand = Math.floor(N * 0.25);
+    const hiBand = Math.ceil(N * 0.75);
     let maxW = -1;
     let maxIdx = Math.floor(N * 0.5);
-    for (let i = 1; i < upperThirdEnd; i++) {
-      if (widths[i] > maxW) { maxW = widths[i]; maxIdx = i; }
+    for (let i = loBand; i <= Math.min(hiBand, N - 1); i++) {
+      if ((widths[i] ?? 0) > maxW) { maxW = widths[i]; maxIdx = i; }
     }
-    const t = maxIdx / (N - 1);
-    // bandY at maxIdx: footY - t*(footY-lipY)
+    const t = maxIdx / Math.max(1, N - 1);
+    // bandY: footY at t=0, lipY at t=1
     const faceY = footY - t * (footY - lipY);
-    const avgWidth = widths.reduce((a, b) => a + b, 0) / widths.length;
-    const scale = 0.5 + avgWidth * 0.4;
+
+    // Constants from buildThrown2Path (must stay in sync):
+    const MIN_HW = 3.2;
+    const MAX_HW = 24.5;
+
+    // Actual half-width in SVG units at the face band
+    const bandW = widths[maxIdx] ?? 0.5;
+    const halfWidthPx = MIN_HW + bandW * (MAX_HW - MIN_HW);
+
+    // The blush ellipses reach ±7.5px at scale=1 (rx=2.2*s at cx=±5*s → 7.2, plus padding).
+    // Use ±7.5 as the face "radius" at scale=1.
+    const FACE_HALF_EXTENT = 7.5;
+    // Target: face fits within 72% of the pot's half-width; allow a small inset
+    const maxScale = (halfWidthPx * 0.72) / FACE_HALF_EXTENT;
+    // Natural scale derived from width (same feel as before for wide pots)
+    const naturalScale = 0.5 + bandW * 0.4;
+    // Cap to fit, enforce min/max bounds
+    const scale = Math.min(Math.max(naturalScale, 0.5), Math.min(maxScale, 1.0));
+
     return { cx: 32, cy: faceY, scale };
   }
   // For preset shapes: center vertically around 57% of viewBox height, centered X
