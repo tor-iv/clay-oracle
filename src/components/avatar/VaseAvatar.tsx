@@ -260,7 +260,7 @@ export default function VaseAvatar({
   const vasePath = isThrownShape
     ? buildThrownPath(parsed.params)
     : isThrown2Shape
-      ? buildThrown2Path(parsed.h, parsed.widths, parsed.edges)
+      ? buildThrown2Path(parsed.h, parsed.widths, parsed.edges, parsed.wobble)
       : getShape(parsed.id).path;
 
   // Resolve glaze to a hex color (supports preset ids AND raw hex)

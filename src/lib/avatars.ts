@@ -188,7 +188,7 @@ export function parseEdge(raw: string | undefined): number {
 export type ParsedShape =
   | { kind: "preset"; id: PresetShapeId }
   | { kind: "thrown"; params: ThrownParams; face: FaceId }
-  | { kind: "thrown2"; h: number; widths: number[]; face: FaceId; edges: number[] };
+  | { kind: "thrown2"; h: number; widths: number[]; face: FaceId; edges: number[]; wobble: number };
 
 /** Parse an avatar_shape string to either a preset or thrown shape. */
 export function parseShape(shape: string): ParsedShape {
@@ -331,7 +331,13 @@ export function parseShape(shape: string): ParsedShape {
         edges = Array(widths.length).fill(single);
       }
 
-      return { kind: "thrown2", h, widths, face: face as FaceId, edges };
+      // Parse wobble (optional asymmetry factor 0..1, default 0)
+      const rawWobble = parts["wobble"];
+      const wobble = rawWobble
+        ? clamp01(parseFloat(rawWobble) || 0)
+        : 0;
+
+      return { kind: "thrown2", h, widths, face: face as FaceId, edges, wobble };
     } catch {
       return { kind: "preset", id: DEFAULT_AVATAR.shape as PresetShapeId };
     }
@@ -348,7 +354,7 @@ export function canonicalizeShape(shape: string): string {
     return parsed.id;
   }
   if (parsed.kind === "thrown2") {
-    return encodeThrown2Shape(parsed.h, parsed.widths, parsed.face, parsed.edges);
+    return encodeThrown2Shape(parsed.h, parsed.widths, parsed.face, parsed.edges, parsed.wobble);
   }
   return encodeThrownShape(parsed.params, parsed.face);
 }
@@ -368,9 +374,13 @@ export function bandsForHeight(h: number): number {
  * Encode a thrown2 vase to a storable string.
  * edges is a per-band array of 0..1 values (0 = round, 1 = straight).
  * Accepts either a number[] (new form) or a single number (old compat — applied to all bands).
+ * wobble is an optional 0..1 asymmetry factor (default 0 = perfectly centered).
+ *   When > 0, buildThrown2Path applies a subtle per-band horizontal skew.
+ *   Missing or 0 → omitted from the string for backward compatibility.
  *
  * New format:
  *   thrown2:h=0.600;w=0.400,0.720,0.500;edge=0.00,0.00,0.00;face=happy
+ *   thrown2:h=0.600;w=0.400,0.720,0.500;edge=0.00,0.00,0.00;face=happy;wobble=0.30
  *
  * face may be a preset id like "happy" or a draw string like "draw:x1,y1,...|..."
  */
@@ -378,7 +388,8 @@ export function encodeThrown2Shape(
   h: number,
   widths: number[],
   face: FaceId | string,
-  edges: number[] | number = 0
+  edges: number[] | number = 0,
+  wobble = 0
 ): string {
   const hStr = clamp01(h).toFixed(3);
   const wStr = widths.map((w) => clamp01(w).toFixed(3)).join(",");
@@ -397,7 +408,13 @@ export function encodeThrown2Shape(
   }
   const edgeStr = edgeArr.map((e) => e.toFixed(2)).join(",");
 
-  return `thrown2:h=${hStr};w=${wStr};edge=${edgeStr};face=${faceStr}`;
+  const base = `thrown2:h=${hStr};w=${wStr};edge=${edgeStr};face=${faceStr}`;
+  // Only encode wobble when non-zero (backward-compatible: old parsers ignore unknown segments)
+  const wobbleClamped = clamp01(wobble);
+  if (wobbleClamped > 0.001) {
+    return `${base};wobble=${wobbleClamped.toFixed(3)}`;
+  }
+  return base;
 }
 
 /**
@@ -549,12 +566,17 @@ export const THROWN2_FOOT_Y = 57;
  * Build the SVG path for a thrown2 vase.
  * edges: per-band array (0..1 per band, length = widths.length).
  *   0 = round/smooth bulge, 1 = straight/faceted.
+ * wobble: 0..1 asymmetry factor — shifts each band's center-x slightly
+ *   off-axis in a slow sine wave, giving a charming lopsided look.
+ *   At wobble=1, max horizontal shift is ±5px at the widest band.
+ *   Path always stays within the [2,62] viewBox x-range.
  * Falls back gracefully if edges is missing, shorter, or a plain number.
  */
 export function buildThrown2Path(
   h: number,
   widths: number[],
-  edges: number[] | number = 0
+  edges: number[] | number = 0,
+  wobble = 0
 ): string {
   const safeH = clamp01(h);
   const p = (n: number) => n.toFixed(2);
@@ -586,15 +608,35 @@ export function buildThrown2Path(
   // MAX_HW=24.5 ensures a full-width (w=1) pot at x=32+24.5=56.5 stays within [3.5,60.5]
   const MIN_HW = 3.2;
   const MAX_HW = 24.5;
-  const rightX: number[] = widths.map((w) => {
+  const safeWobble = clamp01(wobble);
+
+  // Per-band wobble offset: a slow sine wave that oscillates the centerline.
+  // At wobble=1 max shift is ±5px; stays well within [2,62] since MIN_HW≥3.2.
+  function wobbleOffset(bandIndex: number): number {
+    if (safeWobble < 0.001) return 0;
+    // Phase: one full cycle over the bands, seeded by a fixed asymmetric wave
+    const phase = (bandIndex / Math.max(1, N - 1)) * Math.PI * 1.5;
+    return Math.sin(phase + 0.8) * safeWobble * 5;
+  }
+
+  const rightX: number[] = widths.map((w, i) => {
     const hw = MIN_HW + clamp01(w) * (MAX_HW - MIN_HW);
-    return 32 + hw;
+    const cx = 32 + wobbleOffset(i);
+    return cx + hw;
+  });
+
+  // Compute matching left-side Xs considering per-band center offset
+  const leftX: number[] = widths.map((w, i) => {
+    const hw = MIN_HW + clamp01(w) * (MAX_HW - MIN_HW);
+    const cx = 32 + wobbleOffset(i);
+    return cx - hw;
   });
 
   // Small lip flare: the topmost point gets a slight extra flair
   const lipFlare = 1.5;
   const lipRightX = rightX[N - 1] + lipFlare;
-  const lipLeftX  = 32 - (lipRightX - 32);
+  const lipCx = 32 + wobbleOffset(N - 1);
+  const lipLeftX  = lipCx - (lipRightX - lipCx);
 
   // Build the right-side profile points
   interface Pt { x: number; y: number }
@@ -603,12 +645,15 @@ export function buildThrown2Path(
     y: bandY[i],
   }));
 
-  // Build left-side profile: mirror of right, from lip → foot
-  const leftPts: Pt[] = rightPts.map((pt) => ({ x: 64 - pt.x, y: pt.y })).reverse();
-  leftPts[0] = { x: lipLeftX, y: bandY[N - 1] };
+  // Build left-side profile: uses wobble-shifted left Xs, from lip → foot
+  const leftPts: Pt[] = leftX.map((lx, i) => ({
+    x: i === N - 1 ? lipLeftX : lx,
+    y: bandY[i],
+  })).reverse();
 
   const footY = bandY[0];
   const rFoot = rightPts[0].x;
+  const lFoot = leftPts[leftPts.length - 1].x; // after reverse, foot is last
 
   // ── Per-band vertical-tangent spline ─────────────────────────────────────
   // Each segment i→i+1 uses edgeArr[i] to scale the handle length.
@@ -651,17 +696,21 @@ export function buildThrown2Path(
   const topRound = 1 - clamp01(topEdge);
   const botRound = 1 - clamp01(botEdge);
 
+  // Lip/foot arc control points — shifted by wobble for the lopsided look
+  const footCx = 32 + wobbleOffset(0);
+  const lipArcCx = lipCx;
+
   return [
     // Start at right foot
     `M ${p(rFoot)} ${p(footY)}`,
     // Right side: foot → lip
     ...rightSegments,
     // Lip top arc (flat when straight, gently domed when round)
-    `Q 32 ${p(lipY - 2 * topRound)}, ${p(lipLeftX)} ${p(lipY)}`,
+    `Q ${p(lipArcCx)} ${p(lipY - 2 * topRound)}, ${p(lipLeftX)} ${p(lipY)}`,
     // Left side: lip → foot
     ...leftSegments,
     // Close along foot
-    `Q 32 ${p(footY + 1.5 * botRound)}, ${p(rFoot)} ${p(footY)}`,
+    `Q ${p(footCx)} ${p(footY + 1.5 * botRound)}, ${p(rFoot)} ${p(footY)}`,
     "Z",
   ].join(" ");
 }

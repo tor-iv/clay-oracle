@@ -131,6 +131,9 @@ const KNOWN_FACES = new Set(["none", "happy", "sleepy", "winky", "surprised"]);
  * - `edge` may be a single number or a comma-separated list (future per-band values).
  * - `face` may be a preset id or a `draw:…` freehand string.
  *
+ * throwScore: optional 0..1 throw quality from hard mode (ignored / defaulted to neutral here;
+ *   it is passed directly to vaseToArchetype / readVase).
+ *
  * Gracefully falls back to neutral defaults for any missing/malformed field.
  */
 export function extractSignals(shape: string, glaze: string, pattern: string): VaseSignals {
@@ -257,6 +260,16 @@ export interface ArchetypeWeights {
   faceWinky: number;
   faceDrawn: number;
   faceNone: number;
+  /**
+   * Pulls when throw control is HIGH (steady hand, throwScore near 1).
+   * Default 0 — most archetypes are throwScore-neutral.
+   */
+  throwControlHigh?: number;
+  /**
+   * Pulls when throw control is LOW (wild throw, throwScore near 0).
+   * Default 0 — most archetypes are throwScore-neutral.
+   */
+  throwControlLow?: number;
 }
 
 export interface Archetype {
@@ -384,6 +397,7 @@ export const ARCHETYPES: Archetype[] = [
       faceWinky:        0.0,
       faceDrawn:        0.0,
       faceNone:         0.4,
+      throwControlHigh: 0.3,  // deliberate, precise = quiet keeper
     },
   },
   {
@@ -421,6 +435,7 @@ export const ARCHETYPES: Archetype[] = [
       faceWinky:        0.7,  // cheeky wink = wild
       faceDrawn:        0.5,  // hand-drawn faces
       faceNone:         0.0,
+      throwControlLow:  0.6,  // a wild throw = this archetype
     },
   },
   {
@@ -569,6 +584,7 @@ export const ARCHETYPES: Archetype[] = [
       faceWinky:        0.0,
       faceDrawn:        0.0,
       faceNone:         0.5,  // no fuss, no theatrics
+      throwControlHigh: 0.6,  // a perfectly centered throw = this archetype
     },
   },
   {
@@ -606,6 +622,7 @@ export const ARCHETYPES: Archetype[] = [
       faceWinky:        0.3,
       faceDrawn:        0.4,
       faceNone:         0.1,
+      throwControlLow:  0.3,  // a wild throw nudges toward free spirit too
     },
   },
   {
@@ -720,7 +737,7 @@ function scoreArchetype(signals: VaseSignals, w: ArchetypeWeights): number {
 
 // ── Trait phrase generation ───────────────────────────────────────────────
 
-function traitPhrases(signals: VaseSignals): string[] {
+function traitPhrases(signals: VaseSignals, throwScore?: number): string[] {
   const traits: string[] = [];
 
   // Height
@@ -789,6 +806,19 @@ function traitPhrases(signals: VaseSignals): string[] {
     traits.push(faceDescriptions[signals.faceKind] ?? "a painted face");
   }
 
+  // Throw quality (only emitted when hard mode provides a throwScore distinct from neutral)
+  if (throwScore !== undefined && Math.abs(throwScore - 0.7) > 0.15) {
+    if (throwScore >= 0.85) {
+      traits.push("a perfectly centered, controlled throw");
+    } else if (throwScore >= 0.6) {
+      traits.push("a confident, practiced throw");
+    } else if (throwScore >= 0.4) {
+      traits.push("an honest, imperfect throw");
+    } else {
+      traits.push("a wild, off-kilter throw");
+    }
+  }
+
   return traits;
 }
 
@@ -804,26 +834,48 @@ export interface VaseReading {
  * and a list of human-readable trait phrases.
  *
  * On a tie (extremely rare) the archetype that appears first in ARCHETYPES wins.
+ * throwScore: optional 0..1 quality from hard mode (default ~0.7 = neutral, easy mode unaffected).
  */
-export function vaseToArchetype(signals: VaseSignals): VaseReading {
+export function vaseToArchetype(signals: VaseSignals, throwScore?: number): VaseReading {
   let best = ARCHETYPES[0];
   let bestScore = -Infinity;
 
+  // throwScore: 0..1 from hard mode. Neutral = 0.7 (easy mode pots unaffected).
+  // Deviation from neutral shifts scores toward throwControl archetypes.
+  const safeThrowScore = throwScore !== undefined
+    ? Math.max(0, Math.min(1, throwScore))
+    : 0.7; // neutral default — easy mode unchanged
+
   for (const archetype of ARCHETYPES) {
-    const score = scoreArchetype(signals, archetype.weights);
+    let score = scoreArchetype(signals, archetype.weights);
+
+    // Apply throw control weights (only non-zero on affected archetypes)
+    const w = archetype.weights;
+    if (w.throwControlHigh) {
+      // Activates when throwScore > 0.7 (above neutral)
+      const highControl = Math.max(0, (safeThrowScore - 0.7) / 0.3);
+      score += w.throwControlHigh * highControl;
+    }
+    if (w.throwControlLow) {
+      // Activates when throwScore < 0.7 (below neutral)
+      const lowControl = Math.max(0, (0.7 - safeThrowScore) / 0.7);
+      score += w.throwControlLow * lowControl;
+    }
+
     if (score > bestScore) {
       bestScore = score;
       best = archetype;
     }
   }
 
-  return { archetype: best, traits: traitPhrases(signals) };
+  return { archetype: best, traits: traitPhrases(signals, safeThrowScore) };
 }
 
 /**
  * Convenience wrapper: parse raw vase parameters straight to a reading.
  * This is the primary entry point for the result page.
+ * throwScore: optional 0..1 from hard mode (default neutral ~0.7, easy mode unaffected).
  */
-export function readVase(shape: string, glaze: string, pattern: string): VaseReading {
-  return vaseToArchetype(extractSignals(shape, glaze, pattern));
+export function readVase(shape: string, glaze: string, pattern: string, throwScore?: number): VaseReading {
+  return vaseToArchetype(extractSignals(shape, glaze, pattern), throwScore);
 }
