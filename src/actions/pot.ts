@@ -128,7 +128,8 @@ export async function nameOnShelfAction(
  * Accepts playlist | album | track | artist; strips locale prefix + query.
  * Returns null for anything that isn't a real open.spotify.com link.
  */
-export function parseSpotifyEmbedPath(raw: string): string | null {
+// Not exported — a "use server" module may only export async server actions.
+function parseSpotifyEmbedPath(raw: string): string | null {
   const url = raw.trim();
   // type/id directly from a spotify.com URL (optional /intl-xx/ locale prefix)
   const m = url.match(
