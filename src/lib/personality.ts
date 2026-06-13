@@ -311,7 +311,7 @@ export const ARCHETYPES: Archetype[] = [
       "People underestimate you at first, but they remember you long after the flashier ones have faded. " +
       "Your steadiest growth happens quietly, in the background, like roots finding water.",
     // Spotify "Peaceful Piano" — calm, patient, unhurried
-    playlistId: "37i9dQZF1DX4sWSpwq3LiO",
+    playlistId: "37i9dQZF1DX6ziVCJnEm59", // your favorite coffeehouse
     playlistName: "Peaceful Piano",
     accentHex: "#7A8C6E",
     weights: {
@@ -348,7 +348,7 @@ export const ARCHETYPES: Archetype[] = [
       "You have opinions, you share them, and somehow you make people feel included rather than steamrolled. " +
       "There's a fire in you that other people warm themselves on.",
     // Spotify "Mood Booster" — energetic, confident
-    playlistId: "37i9dQZF1DX3rxVfibe1L0",
+    playlistId: "37i9dQZF1DXcF6B6QPhFDv", // Rock This
     playlistName: "Mood Booster",
     accentHex: "#B85C2A",
     weights: {
@@ -385,7 +385,7 @@ export const ARCHETYPES: Archetype[] = [
       "Quiet doesn't mean absent; you notice everything and forget almost nothing. " +
       "The people who know you well consider themselves lucky.",
     // Spotify "lofi beats" — quiet, introspective
-    playlistId: "0vvXsWCC9xrXsKd4FyS8kM",
+    playlistId: "37i9dQZF1DWYcDQ1hSjOpY", // Deep Sleep
     playlistName: "lofi beats",
     accentHex: "#2C3E50",
     weights: {
@@ -423,7 +423,7 @@ export const ARCHETYPES: Archetype[] = [
       "Plans are a starting point at best; you find your best ideas mid-spin. " +
       "Life is more fun because you're in it — even when it's a little chaotic.",
     // Spotify "Indie Pop" — eclectic, kinetic
-    playlistId: "37i9dQZF1DWWEcRhUVtL8n",
+    playlistId: "37i9dQZF1DWWBHeXOYZf74", // POLLEN
     playlistName: "Indie Pop",
     accentHex: "#D4847A",
     weights: {
@@ -461,7 +461,7 @@ export const ARCHETYPES: Archetype[] = [
       "People call it luck, but it's mostly that you keep showing up with an open hand. " +
       "Your kind of hope isn't naive — it's practised.",
     // Spotify "Feelin' Good" — upbeat, warm
-    playlistId: "37i9dQZF1DX9XIFQuFvzM4",
+    playlistId: "37i9dQZF1DXdPec7aLTmlC", // Happy Hits!
     playlistName: "Feelin' Good",
     accentHex: "#D4A840",
     weights: {
@@ -498,7 +498,7 @@ export const ARCHETYPES: Archetype[] = [
       "You think in layers, feel in depths, and occasionally surprise even yourself with what surfaces. " +
       "People come to you when they need something real.",
     // Spotify "Deep Focus" — deep, layered, sustained
-    playlistId: "37i9dQZF1DWZeKCadgRdKQ",
+    playlistId: "37i9dQZF1DWZqd5JICZI0u", // Cinematic Chill Out
     playlistName: "Deep Focus",
     accentHex: "#4A7BAF",
     weights: {
@@ -535,7 +535,7 @@ export const ARCHETYPES: Archetype[] = [
       "That sensitivity isn't a flaw; it's how you catch the things everyone else walks past. " +
       "You make space for people in a way they remember for years.",
     // Spotify "Chill Vibes" — warm, gentle, open
-    playlistId: "37i9dQZF1DX889U0CL85jj",
+    playlistId: "37i9dQZF1DWTwnEm1IYyoj", // Soft Pop Hits
     playlistName: "Chill Vibes",
     accentHex: "#D4847A",
     weights: {
@@ -572,7 +572,7 @@ export const ARCHETYPES: Archetype[] = [
       "but because you don't panic. There's a particular kind of strength in being someone others can " +
       "rely on, and you've been quietly building it your whole life.",
     // Spotify "Jazz Vibes" — steady, reliable, timeless groove
-    playlistId: "37i9dQZF1DX0SM0LYsmbMT",
+    playlistId: "37i9dQZF1DXbITWG1ZJKYt", // Jazz in the Background
     playlistName: "Jazz Vibes",
     accentHex: "#7A8C6E",
     weights: {
@@ -610,7 +610,7 @@ export const ARCHETYPES: Archetype[] = [
       "Constraints make you creative — you find the gap, the workaround, the left-field option " +
       "everyone else overlooked. The world needs more people who refuse to be boxed in.",
     // Spotify "Indie Pop" — free-ranging, adventurous
-    playlistId: "37i9dQZF1DWWEcRhUVtL8n",
+    playlistId: "37i9dQZF1DWYV7OOaGhoH0", // Roots Rising
     playlistName: "Indie Pop",
     accentHex: "#A8C5A0",
     weights: {
@@ -648,7 +648,7 @@ export const ARCHETYPES: Archetype[] = [
       "made peace with that. You're drawn to things that last: slow meals, long conversations, " +
       "objects made with care. People talk to you for a few minutes and feel inexplicably better.",
     // Spotify "Sad Songs" — reflective, autumnal, deeply felt
-    playlistId: "37i9dQZF1DX7qK8ma5wgG1",
+    playlistId: "37i9dQZF1DWWzBc3TOlaAV", // Soul Coffee
     playlistName: "Sad Songs",
     accentHex: "#D4A840",
     weights: {

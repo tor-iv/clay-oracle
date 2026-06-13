@@ -452,11 +452,11 @@ export function canonicalizeShape(shape: string): string {
 
 /**
  * How many width-adjustable bands a given height produces.
- * h=0 → 2 bands (squat), h=1 → 7 bands (tall, maximum detail).
- * Formula: 2 + round(h * 5), giving [2, 3, 4, 5, 6, 7] across the range.
+ * h=0 → 2 bands (squat), h=1 → 5 bands (tall). Fewer, taller sections that
+ * flow more smoothly. Formula: 2 + round(h * 3), giving [2, 3, 4, 5].
  */
 export function bandsForHeight(h: number): number {
-  return 2 + Math.round(clamp01(h) * 5);
+  return 2 + Math.round(clamp01(h) * 3);
 }
 
 /**
