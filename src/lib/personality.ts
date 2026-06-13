@@ -290,6 +290,8 @@ export interface Archetype {
   id: string;
   name: string;
   emoji: string;
+  /** DoodleIcon name for this archetype — use instead of emoji where hand-drawn style is preferred. */
+  iconName: import("@/components/ui/DoodleIcon").DoodleName;
   /** 2-3 sentence fallback reading in second person (used when LLM is unavailable). */
   blurb: string;
   /** Spotify playlist ID (public editorial playlist). */
@@ -306,6 +308,7 @@ export const ARCHETYPES: Archetype[] = [
     id: "slow-bloomer",
     name: "The Slow Bloomer",
     emoji: "🌱",
+    iconName: "sprout",
     blurb:
       "You're someone who takes your time and means it — rushing has never made anything worth keeping. " +
       "People underestimate you at first, but they remember you long after the flashier ones have faded. " +
@@ -343,6 +346,7 @@ export const ARCHETYPES: Archetype[] = [
     id: "bold-vessel",
     name: "The Bold Vessel",
     emoji: "🔥",
+    iconName: "flame",
     blurb:
       "You take up space and you're not apologising for it — the world is bigger when you're in it. " +
       "You have opinions, you share them, and somehow you make people feel included rather than steamrolled. " +
@@ -380,6 +384,7 @@ export const ARCHETYPES: Archetype[] = [
     id: "quiet-keeper",
     name: "The Quiet Keeper",
     emoji: "🌙",
+    iconName: "moon",
     blurb:
       "You hold things — memories, secrets, feelings — with more care than most people realise. " +
       "Quiet doesn't mean absent; you notice everything and forget almost nothing. " +
@@ -418,6 +423,7 @@ export const ARCHETYPES: Archetype[] = [
     id: "wild-throw",
     name: "The Wild Throw",
     emoji: "🌀",
+    iconName: "swirl",
     blurb:
       "You're the person who suggests something impulsive and somehow makes everyone glad they said yes. " +
       "Plans are a starting point at best; you find your best ideas mid-spin. " +
@@ -456,6 +462,7 @@ export const ARCHETYPES: Archetype[] = [
     id: "sunny-optimist",
     name: "The Sunny Optimist",
     emoji: "☀️",
+    iconName: "sun",
     blurb:
       "You genuinely believe things will work out, and weirdly, they usually do. " +
       "People call it luck, but it's mostly that you keep showing up with an open hand. " +
@@ -493,6 +500,7 @@ export const ARCHETYPES: Archetype[] = [
     id: "deep-well",
     name: "The Deep Well",
     emoji: "🌊",
+    iconName: "ocean",
     blurb:
       "There's more to you than almost anyone has found the bottom of — and you like it that way. " +
       "You think in layers, feel in depths, and occasionally surprise even yourself with what surfaces. " +
@@ -530,6 +538,7 @@ export const ARCHETYPES: Archetype[] = [
     id: "tender-heart",
     name: "The Tender Heart",
     emoji: "🌸",
+    iconName: "blossom",
     blurb:
       "You feel things the way some people feel weather — fully, in your whole body. " +
       "That sensitivity isn't a flaw; it's how you catch the things everyone else walks past. " +
@@ -567,6 +576,7 @@ export const ARCHETYPES: Archetype[] = [
     id: "steady-hand",
     name: "The Steady Hand",
     emoji: "🪨",
+    iconName: "stone",
     blurb:
       "You're the one people call when things go sideways — not because you have all the answers, " +
       "but because you don't panic. There's a particular kind of strength in being someone others can " +
@@ -605,6 +615,7 @@ export const ARCHETYPES: Archetype[] = [
     id: "free-spirit",
     name: "The Free Spirit",
     emoji: "🪁",
+    iconName: "kite",
     blurb:
       "You follow what lights you up, and somehow that's enough of a plan. " +
       "Constraints make you creative — you find the gap, the workaround, the left-field option " +
@@ -643,6 +654,7 @@ export const ARCHETYPES: Archetype[] = [
     id: "old-soul",
     name: "The Old Soul",
     emoji: "🍂",
+    iconName: "leaf",
     blurb:
       "You've always felt slightly out of step with whatever era you were born into — and you've " +
       "made peace with that. You're drawn to things that last: slow meals, long conversations, " +
