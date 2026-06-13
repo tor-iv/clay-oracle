@@ -1,4 +1,4 @@
-import ModeSwitch from "@/components/ModeSwitch";
+import AvatarBuilder from "@/components/avatar/AvatarBuilder";
 import InkButton from "@/components/ui/InkButton";
 import DoodleIcon from "@/components/ui/DoodleIcon";
 import { readPotAction } from "@/actions/pot";
@@ -36,7 +36,7 @@ export default function Home() {
         </div>
 
         <form action={readPotAction} className="flex flex-col gap-6">
-          <ModeSwitch />
+          <AvatarBuilder />
           <div className="flex justify-center">
             <InkButton type="submit" variant="primary" className="w-full">
               <DoodleIcon name="sparkle" size={18} color="#F5F0E8" />
