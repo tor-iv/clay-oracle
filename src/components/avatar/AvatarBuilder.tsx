@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import VaseAvatar from "./VaseAvatar";
 import FaceDrawPad from "./FaceDrawPad";
 import DecoratePad from "./DecoratePad";
@@ -8,7 +8,6 @@ import {
   AVATAR_SHAPES,
   AVATAR_GLAZES,
   AVATAR_PATTERNS,
-  AVATAR_FACES,
   DEFAULT_AVATAR,
   encodeThrown2Shape,
   buildThrown2Path,
@@ -17,6 +16,14 @@ import {
   DEFAULT_THROWN2_WIDTHS,
   DEFAULT_THROWN2_H,
   parseFaceDrawing,
+  parseMiiFace,
+  encodeMiiFace,
+  DEFAULT_MII_FACE,
+  MII_EYES_COUNT,
+  MII_BROWS_COUNT,
+  MII_MOUTH_COUNT,
+  MII_CHEEKS_COUNT,
+  MII_ACCESSORY_IDS,
   parseDecorationDrawing,
   resolveGlaze,
   parsePattern,
@@ -28,7 +35,15 @@ import type {
   AvatarPattern,
   AvatarPatternStyle,
   FaceId,
+  MiiFace,
 } from "@/lib/avatars";
+import {
+  EYE_PARTS,
+  BROW_PARTS,
+  MOUTH_PARTS,
+  CHEEK_PARTS,
+  ACCESSORY_PARTS,
+} from "@/lib/faceParts";
 import DoodleIcon from "@/components/ui/DoodleIcon";
 
 interface AvatarBuilderProps {
@@ -71,7 +86,7 @@ function randomThrown2Params(): {
   widths: number[];
   edges: number[];
   glaze: string;
-  face: FaceId;
+  face: FaceId | string;
 } {
   const h = 0.2 + Math.random() * 0.8;
   const n = bandsForHeight(h);
@@ -92,8 +107,31 @@ function randomThrown2Params(): {
     glaze = AVATAR_GLAZES[Math.floor(Math.random() * AVATAR_GLAZES.length)].id;
   }
 
-  const faces: FaceId[] = ["happy", "sleepy", "winky", "surprised", "none"];
-  const face = faces[Math.floor(Math.random() * faces.length)];
+  // Face: 60% chance of mii face, 30% preset, 10% none
+  const MII_PALETTE = ["#2C1810", "#B84C2A", "#5B8EC4", "#D4847A", "#6B8F6A", "#C9901A"];
+  let face: FaceId | string;
+  const faceRoll = Math.random();
+  if (faceRoll < 0.6) {
+    // Random mii face
+    const accessoryRoll = Math.random();
+    const accessory = accessoryRoll < 0.55
+      ? "none"
+      : MII_ACCESSORY_IDS[Math.floor(Math.random() * MII_ACCESSORY_IDS.length)];
+    const mii: MiiFace = {
+      eyes:      Math.floor(Math.random() * MII_EYES_COUNT),
+      brows:     Math.floor(Math.random() * MII_BROWS_COUNT),
+      mouth:     Math.floor(Math.random() * MII_MOUTH_COUNT),
+      cheeks:    Math.floor(Math.random() * MII_CHEEKS_COUNT),
+      accessory,
+      ink:       MII_PALETTE[Math.floor(Math.random() * MII_PALETTE.length)],
+    };
+    face = encodeMiiFace(mii);
+  } else if (faceRoll < 0.9) {
+    const faces: FaceId[] = ["happy", "sleepy", "winky", "surprised"];
+    face = faces[Math.floor(Math.random() * faces.length)];
+  } else {
+    face = "none";
+  }
 
   return { h, widths, edges, glaze, face };
 }
@@ -109,81 +147,63 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-// ── WholePotEdgeToggle ────────────────────────────────────────────────────
-// Single whole-pot rounded vs angular control.
+// ── WholePotEdgeSlider ────────────────────────────────────────────────────
+// Single draggable whole-pot edge control: slide from rounded (0) to angular (1).
+// Values in between morph the silhouette continuously.
 
-function WholePotEdgeToggle({
+function WholePotEdgeSlider({
   edges,
   onEdgesChange,
 }: {
   edges: number[];
   onEdgesChange: (edges: number[]) => void;
 }) {
-  const isRounded = edges.every((e) => e < 0.5);
+  const value = Math.min(Math.max(edges[0] ?? 0, 0), 1);
 
   function setAll(val: number) {
-    onEdgesChange(Array(edges.length).fill(val));
+    onEdgesChange(Array(Math.max(1, edges.length)).fill(val));
   }
 
   return (
     <div
       style={{
-        display: "inline-flex",
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        width: "100%",
+        maxWidth: 260,
+        background: "rgba(232,213,176,0.3)",
         borderRadius: 10,
-        overflow: "hidden",
-        border: "1.5px solid rgba(44,24,16,0.22)",
-        background: "rgba(232,213,176,0.25)",
+        padding: "8px 14px 10px",
+        border: "1.5px solid rgba(44,24,16,0.18)",
       }}
     >
-      <button
-        type="button"
-        onClick={() => setAll(0)}
-        aria-pressed={isRounded}
-        title="Rounded silhouette"
+      <div
         style={{
-          fontFamily: "var(--font-hand)",
-          fontSize: "0.82rem",
-          color: isRounded ? "#3A6B32" : "#5C3D2E",
-          background: isRounded
-            ? "rgba(168,197,160,0.65)"
-            : "transparent",
-          border: "none",
-          borderRight: "1px solid rgba(44,24,16,0.15)",
-          padding: "5px 14px",
-          cursor: "pointer",
-          fontWeight: isRounded ? 700 : 400,
-          transition: "background 0.12s, color 0.12s, font-weight 0.1s",
           display: "flex",
-          alignItems: "center",
-          gap: 5,
+          justifyContent: "space-between",
+          fontFamily: "var(--font-hand)",
+          fontSize: "0.78rem",
+          color: "var(--color-clay-ink-muted)",
         }}
       >
-        <span style={{ fontSize: "0.95rem" }}>◠</span> rounded
-      </button>
-      <button
-        type="button"
-        onClick={() => setAll(1)}
-        aria-pressed={!isRounded}
-        title="Angular silhouette"
-        style={{
-          fontFamily: "var(--font-hand)",
-          fontSize: "0.82rem",
-          color: !isRounded ? "#2A5C8A" : "#5C3D2E",
-          background: !isRounded
-            ? "rgba(74,123,175,0.3)"
-            : "transparent",
-          border: "none",
-          padding: "5px 14px",
-          cursor: "pointer",
-          fontWeight: !isRounded ? 700 : 400,
-          transition: "background 0.12s, color 0.12s, font-weight 0.1s",
-          display: "flex",
-          alignItems: "center",
-          gap: 5,
-        }}
-      >
-        <span style={{ fontSize: "0.95rem" }}>◇</span> angular
-      </button>
+        <span style={{ fontWeight: value < 0.5 ? 700 : 400, color: value < 0.5 ? "#3A6B32" : undefined }}>
+          ◠ rounded
+        </span>
+        <span style={{ fontWeight: value >= 0.5 ? 700 : 400, color: value >= 0.5 ? "#2A5C8A" : undefined }}>
+          angular ◇
+        </span>
+      </div>
+      <input
+        type="range"
+        min="0"
+        max="1"
+        step="0.05"
+        value={value}
+        onChange={(e) => setAll(parseFloat(e.target.value))}
+        aria-label="Pot edge — rounded to angular"
+        style={{ width: "100%", cursor: "pointer", accentColor: "#B85C2A" }}
+      />
     </div>
   );
 }
@@ -657,124 +677,373 @@ function GlazePicker({
   );
 }
 
-// ── FacePicker ────────────────────────────────────────────────────────────
+// ── FaceStudio ────────────────────────────────────────────────────────────
+// Two-tab face builder: "Build" (Mii-style part picker) and "Doodle" (freehand).
 
-function FacePicker({
+const FACE_PALETTE = [
+  { id: "ink",    hex: "#2C1810", label: "Ink" },
+  { id: "rust",   hex: "#B84C2A", label: "Rust" },
+  { id: "sky",    hex: "#5B8EC4", label: "Sky" },
+  { id: "blush",  hex: "#D4847A", label: "Blush" },
+  { id: "sage",   hex: "#6B8F6A", label: "Sage" },
+  { id: "honey",  hex: "#C9901A", label: "Honey" },
+];
+
+const PREVIEW_S = 2.0; // scale for chip SVG previews (cx=32,cy=32 in 64px viewBox)
+const CHIP_SIZE = 52;
+
+/** Small inline SVG chip that previews a single face part. */
+function PartChip({
+  part,
+  category,
+  isSelected,
+  onClick,
+}: {
+  part: { id: string; label: string; render: (cx: number, cy: number, s: number, ink: string) => React.ReactNode };
+  category: string;
+  isSelected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${category}: ${part.label}`}
+      aria-pressed={isSelected}
+      title={part.label}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 2,
+        padding: "4px 5px",
+        borderRadius: 9,
+        background: isSelected ? "rgba(184,92,42,0.13)" : "rgba(232,213,176,0.35)",
+        border: isSelected ? "2px solid #2C1810" : "2px solid transparent",
+        cursor: "pointer",
+        transform: isSelected ? "scale(1.1)" : "scale(1)",
+        transition: "transform 0.1s ease, border-color 0.1s, background 0.1s",
+        flexShrink: 0,
+      }}
+    >
+      <svg
+        width={CHIP_SIZE}
+        height={CHIP_SIZE}
+        viewBox="0 0 64 64"
+        fill="none"
+        style={{ display: "block" }}
+      >
+        {/* Cream background circle */}
+        <circle cx="32" cy="32" r="28" fill="rgba(245,240,232,0.9)" stroke="rgba(44,24,16,0.12)" strokeWidth="1" />
+        {part.render(32, 32, PREVIEW_S, "#2C1810")}
+      </svg>
+      <span
+        style={{
+          fontFamily: "var(--font-hand)",
+          fontSize: "0.62rem",
+          color: isSelected ? "#2C1810" : "var(--color-clay-ink-muted)",
+          lineHeight: 1,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {part.label}
+      </span>
+    </button>
+  );
+}
+
+/** Horizontal scrollable row of part chips with a label. */
+function PartRow({
+  label,
+  parts,
+  selectedIndex,
+  onSelect,
+}: {
+  label: string;
+  parts: { id: string; label: string; render: (cx: number, cy: number, s: number, ink: string) => React.ReactNode }[];
+  selectedIndex: number;
+  onSelect: (i: number) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span
+        style={{
+          fontFamily: "var(--font-hand)",
+          fontSize: "0.75rem",
+          color: "var(--color-clay-ink-muted)",
+          paddingLeft: 2,
+        }}
+      >
+        {label}
+      </span>
+      <div
+        style={{
+          display: "flex",
+          gap: 5,
+          overflowX: "auto",
+          paddingBottom: 2,
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
+        {parts.map((part, i) => (
+          <PartChip
+            key={part.id}
+            part={part}
+            category={label}
+            isSelected={i === selectedIndex}
+            onClick={() => onSelect(i)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Horizontal scrollable row for accessory (keyed by string id, not index). */
+function AccessoryRow({
+  selectedId,
+  onSelect,
+}: {
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span
+        style={{
+          fontFamily: "var(--font-hand)",
+          fontSize: "0.75rem",
+          color: "var(--color-clay-ink-muted)",
+          paddingLeft: 2,
+        }}
+      >
+        Accessory
+      </span>
+      <div
+        style={{
+          display: "flex",
+          gap: 5,
+          overflowX: "auto",
+          paddingBottom: 2,
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
+        {ACCESSORY_PARTS.map((part) => (
+          <PartChip
+            key={part.id}
+            part={part}
+            category="Accessory"
+            isSelected={part.id === selectedId}
+            onClick={() => onSelect(part.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FaceStudio({
   face,
   glaze,
-  pattern,
-  thrown2H,
-  thrown2Widths,
-  edges,
   onFaceChange,
 }: {
   face: FaceId | string;
   glaze: string;
-  pattern: string;
-  thrown2H: number;
-  thrown2Widths: number[];
-  edges: number[];
   onFaceChange: (f: FaceId | string) => void;
 }) {
-  const [drawMode, setDrawMode] = useState(false);
+  // Determine active tab from the current face type
+  const defaultTab = typeof face === "string" && face.startsWith("draw:") ? "doodle" : "build";
+  const [tab, setTab] = useState<"build" | "doodle">(defaultTab);
   const glazeHex = resolveGlaze(glaze);
 
-  function handlePresetClick(f: FaceId) {
-    setDrawMode(false);
-    onFaceChange(f);
+  // Parse mii state from face prop (or fall back to defaults)
+  const initMii: MiiFace = typeof face === "string" && face.startsWith("mii:")
+    ? parseMiiFace(face)
+    : { ...DEFAULT_MII_FACE };
+
+  const [mii, setMii] = useState<MiiFace>(initMii);
+
+  // Keep mii state in sync when face prop changes externally (e.g. surprise me)
+  useEffect(() => {
+    if (typeof face === "string" && face.startsWith("mii:")) {
+      setMii(parseMiiFace(face));
+    }
+  }, [face]);
+
+  function updateMii(update: Partial<MiiFace>) {
+    const next = { ...mii, ...update };
+    setMii(next);
+    onFaceChange(encodeMiiFace(next));
   }
 
   function handleDrawChange(encoding: string) {
-    onFaceChange(encoding === "none" || !encoding ? "none" : encoding);
+    onFaceChange(!encoding || encoding === "none" ? "none" : encoding);
   }
+
+  // Tab pill styling
+  const pillBase: React.CSSProperties = {
+    fontFamily: "var(--font-hand)",
+    fontSize: "0.82rem",
+    padding: "5px 16px",
+    borderRadius: 20,
+    border: "none",
+    cursor: "pointer",
+    transition: "background 0.15s, color 0.15s",
+  };
+  const pillActive: React.CSSProperties = {
+    background: "#B85C2A",
+    color: "#F5F0E8",
+  };
+  const pillInactive: React.CSSProperties = {
+    background: "rgba(232,213,176,0.5)",
+    color: "var(--color-clay-ink-muted)",
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {/* Preset face chips */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {AVATAR_FACES.map((f) => {
-          const shapeStr = encodeThrown2Shape(thrown2H, thrown2Widths, f.id, edges);
-          const isSelected = !drawMode && face === f.id;
-          return (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => handlePresetClick(f.id)}
-              aria-label={f.label}
-              aria-pressed={isSelected}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 3,
-                padding: "6px 8px",
-                borderRadius: 10,
-                background: isSelected ? "rgba(184,92,42,0.12)" : "rgba(232,213,176,0.3)",
-                border: isSelected ? "2px solid #2C1810" : "2px solid transparent",
-                cursor: "pointer",
-                transform: isSelected ? "scale(1.08)" : "scale(1)",
-                transition: "transform 0.12s ease, border-color 0.12s, background 0.12s",
-              }}
-            >
-              <VaseAvatar shape={shapeStr} glaze={glaze} pattern={pattern} size={40} />
-              <span
-                style={{
-                  fontFamily: "var(--font-hand)",
-                  fontSize: "0.7rem",
-                  color: "var(--color-clay-ink-muted)",
-                  lineHeight: 1,
-                }}
-              >
-                {f.label}
-              </span>
-            </button>
-          );
-        })}
-
-        {/* Draw mode toggle */}
+      {/* Tab toggle */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <button
           type="button"
           onClick={() => {
-            setDrawMode((v) => !v);
-            if (!drawMode && !face.toString().startsWith("draw:")) {
+            setTab("build");
+            // If currently a draw face, switch to mii
+            if (typeof face !== "string" || !face.startsWith("mii:")) {
+              onFaceChange(encodeMiiFace(mii));
+            }
+          }}
+          style={{ ...pillBase, ...(tab === "build" ? pillActive : pillInactive) }}
+          aria-pressed={tab === "build"}
+        >
+          Build
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setTab("doodle");
+            // If currently a mii/preset face, don't wipe — just switch display
+            if (typeof face === "string" && !face.startsWith("draw:")) {
               onFaceChange("none");
             }
           }}
-          aria-pressed={drawMode}
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 3,
-            padding: "6px 8px",
-            borderRadius: 10,
-            background: drawMode ? "rgba(212,168,64,0.15)" : "rgba(232,213,176,0.3)",
-            border: drawMode ? "2px solid #D4A840" : "2px dashed rgba(44,24,16,0.25)",
-            cursor: "pointer",
-            transform: drawMode ? "scale(1.05)" : "scale(1)",
-            transition: "transform 0.12s ease, border-color 0.12s, background 0.12s",
-          }}
+          style={{ ...pillBase, ...(tab === "doodle" ? pillActive : pillInactive) }}
+          aria-pressed={tab === "doodle"}
         >
-          <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-            <rect width="40" height="40" rx="8" fill="rgba(245,240,232,0.6)" />
-            <path d="M 10 28 Q 15 18 20 22 Q 25 26 30 14" stroke="#2C1810" strokeWidth="1.6" fill="none" strokeLinecap="round" />
-            <circle cx="30" cy="12" r="2.5" fill="#B85C2A" />
-          </svg>
-          <span
-            style={{
-              fontFamily: "var(--font-hand)",
-              fontSize: "0.7rem",
-              color: drawMode ? "#D4A840" : "var(--color-clay-ink-muted)",
-              lineHeight: 1,
-            }}
-          >
-            draw
-          </span>
+          Doodle
         </button>
       </div>
 
-      {/* Draw pad (shown when drawMode is on) */}
-      {drawMode && (
+      {/* Build tab */}
+      {tab === "build" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <PartRow
+            label="Eyes"
+            parts={EYE_PARTS}
+            selectedIndex={mii.eyes}
+            onSelect={(i) => updateMii({ eyes: i })}
+          />
+          <PartRow
+            label="Brows"
+            parts={BROW_PARTS}
+            selectedIndex={mii.brows}
+            onSelect={(i) => updateMii({ brows: i })}
+          />
+          <PartRow
+            label="Mouth"
+            parts={MOUTH_PARTS}
+            selectedIndex={mii.mouth}
+            onSelect={(i) => updateMii({ mouth: i })}
+          />
+          <PartRow
+            label="Cheeks"
+            parts={CHEEK_PARTS}
+            selectedIndex={mii.cheeks}
+            onSelect={(i) => updateMii({ cheeks: i })}
+          />
+          <AccessoryRow selectedId={mii.accessory} onSelect={(id) => updateMii({ accessory: id })} />
+
+          {/* Ink color row */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontFamily: "var(--font-hand)", fontSize: "0.75rem", color: "var(--color-clay-ink-muted)", paddingLeft: 2 }}>
+              Ink Color
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              {FACE_PALETTE.map((c) => {
+                const isActive = mii.ink === c.hex;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    title={c.label}
+                    aria-label={c.label}
+                    aria-pressed={isActive}
+                    onClick={() => updateMii({ ink: c.hex })}
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: "50%",
+                      background: c.hex,
+                      border: isActive ? "2.5px solid #2C1810" : "1.5px solid rgba(44,24,16,0.22)",
+                      transform: isActive ? "scale(1.2)" : "scale(1)",
+                      cursor: "pointer",
+                      boxShadow: isActive ? "0 0 0 2px rgba(44,24,16,0.14)" : "none",
+                      transition: "transform 0.1s",
+                      flexShrink: 0,
+                    }}
+                  />
+                );
+              })}
+              {/* Custom ink color */}
+              <label
+                title="Custom ink color"
+                style={{
+                  position: "relative",
+                  width: 24,
+                  height: 24,
+                  borderRadius: "50%",
+                  background: `conic-gradient(#2C1810, #B84C2A, #5B8EC4, #D4847A, #6B8F6A, #C9901A, #2C1810)`,
+                  border: FACE_PALETTE.every((c) => c.hex !== mii.ink) ? "2.5px solid #2C1810" : "1.5px solid rgba(44,24,16,0.3)",
+                  cursor: "pointer",
+                  overflow: "hidden",
+                  flexShrink: 0,
+                }}
+              >
+                <input
+                  type="color"
+                  value={mii.ink}
+                  onChange={(e) => updateMii({ ink: e.target.value })}
+                  style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%", padding: 0, border: "none" }}
+                  aria-label="Custom ink color"
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* No-face button */}
+          <button
+            type="button"
+            onClick={() => onFaceChange("none")}
+            style={{
+              fontFamily: "var(--font-hand)",
+              fontSize: "0.75rem",
+              color: face === "none" ? "#B85C2A" : "rgba(92,61,46,0.6)",
+              background: face === "none" ? "rgba(184,92,42,0.1)" : "transparent",
+              border: face === "none" ? "1.5px dashed #B85C2A" : "1.5px dashed rgba(44,24,16,0.2)",
+              borderRadius: 8,
+              padding: "4px 12px",
+              cursor: "pointer",
+              alignSelf: "flex-start",
+              marginTop: 2,
+            }}
+            aria-pressed={face === "none"}
+          >
+            ✕ no face
+          </button>
+        </div>
+      )}
+
+      {/* Doodle tab */}
+      {tab === "doodle" && (
         <div
           style={{
             background: "rgba(232,213,176,0.25)",
@@ -794,7 +1063,6 @@ function FacePicker({
           />
         </div>
       )}
-
     </div>
   );
 }
@@ -1072,9 +1340,10 @@ export default function AvatarBuilder({
   }
 
   function handleEdgesChange(newEdges: number[]) {
-    // Always keep the whole-pot edge uniform: use the value from index 0
-    const val = newEdges[0] ?? 0;
-    setEdges(Array(newEdges.length).fill(val > 0.5 ? 1 : 0));
+    // Always keep the whole-pot edge uniform: use the value from index 0.
+    // Continuous 0..1 (slider) — 0 = round, 1 = angular, anything between morphs.
+    const val = Math.min(Math.max(newEdges[0] ?? 0, 0), 1);
+    setEdges(Array(newEdges.length).fill(val));
   }
 
   const shapeValue = mode === "throw"
@@ -1135,7 +1404,7 @@ export default function AvatarBuilder({
           />
 
           {/* Whole-pot edge style */}
-          <WholePotEdgeToggle edges={edges} onEdgesChange={handleEdgesChange} />
+          <WholePotEdgeSlider edges={edges} onEdgesChange={handleEdgesChange} />
 
           {/* Action buttons */}
           <div className="flex gap-2 flex-wrap justify-center">
@@ -1225,7 +1494,7 @@ export default function AvatarBuilder({
         </div>
       )}
 
-      {/* ── Face picker ────────────────────────────────────────────────────── */}
+      {/* ── Face studio ────────────────────────────────────────────────────── */}
       {mode === "throw" && (
         <section>
           <h4
@@ -1234,13 +1503,9 @@ export default function AvatarBuilder({
           >
             Face
           </h4>
-          <FacePicker
+          <FaceStudio
             face={face}
             glaze={glaze}
-            pattern={pattern}
-            thrown2H={thrown2H}
-            thrown2Widths={thrown2Widths}
-            edges={edges}
             onFaceChange={setFace}
           />
         </section>

@@ -8,10 +8,18 @@ import {
   THROWN2_FOOT_Y,
   resolveGlaze,
   parseFaceDrawing,
+  parseMiiFace,
   parsePattern,
   parseDecorationDrawing,
 } from "@/lib/avatars";
 import type { AvatarShape, AvatarGlaze, AvatarPattern, FaceId, ThrownParams } from "@/lib/avatars";
+import {
+  getEyePart,
+  getBrowPart,
+  getMouthPart,
+  getCheekPart,
+  getAccessoryPart,
+} from "@/lib/faceParts";
 
 interface VaseAvatarProps {
   shape?: AvatarShape | string;
@@ -121,6 +129,22 @@ function FaceOverlay({
             />
           );
         })}
+      </g>
+    );
+  }
+
+  // Mii part-based face
+  if (typeof face === "string" && face.startsWith("mii:")) {
+    const mii = parseMiiFace(face);
+    const s = scale;
+    const ink = mii.ink || "#2C1810";
+    return (
+      <g>
+        {getCheekPart(mii.cheeks).render(cx, cy, s, ink)}
+        {getEyePart(mii.eyes).render(cx, cy, s, ink)}
+        {getBrowPart(mii.brows).render(cx, cy, s, ink)}
+        {getMouthPart(mii.mouth).render(cx, cy, s, ink)}
+        {getAccessoryPart(mii.accessory).render(cx, cy, s, ink)}
       </g>
     );
   }
@@ -255,8 +279,39 @@ function getFacePosition(
 
     const N = widths.length;
 
-    // Place face near the visual center of the body (40–60% height range)
-    // Find widest band in the middle 40–75% range for a natural centering
+    // Constants from buildThrown2Path (must stay in sync):
+    const MIN_HW = 3.2;
+    const MAX_HW = 24.5;
+
+    // Per-band Y positions + half-widths (mirror buildThrown2Path exactly).
+    // Band 0 = foot (bottom), band N-1 = lip (top).
+    const bandY: number[] = [];
+    const bandHW: number[] = [];
+    for (let i = 0; i < N; i++) {
+      const t = i / Math.max(1, N - 1);
+      bandY.push(footY - t * (footY - lipY));
+      const w = Math.min(Math.max(widths[i] ?? 0.5, 0), 1);
+      bandHW.push(MIN_HW + w * (MAX_HW - MIN_HW));
+    }
+
+    // Linearly-interpolated wall half-width at any Y. This is a *conservative*
+    // estimate: round walls bulge OUTWARD past the linear chord, so the real
+    // pot is never narrower than this — guaranteeing the face fits.
+    const halfWidthAt = (y: number): number => {
+      if (y >= bandY[0]) return bandHW[0];           // at/below foot
+      if (y <= bandY[N - 1]) return bandHW[N - 1];   // at/above lip
+      for (let i = 0; i < N - 1; i++) {
+        const yBot = bandY[i];      // larger y (lower)
+        const yTop = bandY[i + 1];  // smaller y (higher)
+        if (y <= yBot && y >= yTop) {
+          const f = (yBot - y) / (yBot - yTop);
+          return bandHW[i] + f * (bandHW[i + 1] - bandHW[i]);
+        }
+      }
+      return bandHW[N - 1];
+    };
+
+    // Center the face on the widest band within the 25–75% body range.
     const loBand = Math.floor(N * 0.25);
     const hiBand = Math.ceil(N * 0.75);
     let maxW = -1;
@@ -264,27 +319,32 @@ function getFacePosition(
     for (let i = loBand; i <= Math.min(hiBand, N - 1); i++) {
       if ((widths[i] ?? 0) > maxW) { maxW = widths[i]; maxIdx = i; }
     }
-    const t = maxIdx / Math.max(1, N - 1);
-    // bandY: footY at t=0, lipY at t=1
-    const faceY = footY - t * (footY - lipY);
+    const faceY = bandY[maxIdx];
 
-    // Constants from buildThrown2Path (must stay in sync):
-    const MIN_HW = 3.2;
-    const MAX_HW = 24.5;
+    // Face footprint at scale=1 (covers both preset faces and the 14×12
+    // custom-draw zone): ±7.2px horizontally, and ±6px vertically around cy.
+    const FACE_HALF_EXTENT = 7.2;
+    const FACE_V_UP = 6;
+    const FACE_V_DOWN = 6;
 
-    // Actual half-width in SVG units at the face band
-    const bandW = widths[maxIdx] ?? 0.5;
-    const halfWidthPx = MIN_HW + bandW * (MAX_HW - MIN_HW);
+    // Natural scale from the face band's width (keeps the old feel on wide pots).
+    const naturalScale = Math.min(0.5 + (widths[maxIdx] ?? 0.5) * 0.4, 1.0);
 
-    // The blush ellipses reach ±7.5px at scale=1 (rx=2.2*s at cx=±5*s → 7.2, plus padding).
-    // Use ±7.5 as the face "radius" at scale=1.
-    const FACE_HALF_EXTENT = 7.5;
-    // Target: face fits within 72% of the pot's half-width; allow a small inset
-    const maxScale = (halfWidthPx * 0.72) / FACE_HALF_EXTENT;
-    // Natural scale derived from width (same feel as before for wide pots)
-    const naturalScale = 0.5 + bandW * 0.4;
-    // Cap to fit, enforce min/max bounds
-    const scale = Math.min(Math.max(naturalScale, 0.5), Math.min(maxScale, 1.0));
+    // The limiting wall is the NARROWEST point the face spans vertically —
+    // critical for hourglass/waisted pots where the face sits at a pinch.
+    // Sample the span at the face's natural (largest) extent for a safe bound.
+    const spanTop = faceY - FACE_V_UP * naturalScale;
+    const spanBot = faceY + FACE_V_DOWN * naturalScale;
+    let minHW = Infinity;
+    const SAMPLES = 8;
+    for (let k = 0; k <= SAMPLES; k++) {
+      const y = spanTop + (spanBot - spanTop) * (k / SAMPLES);
+      minHW = Math.min(minHW, halfWidthAt(y));
+    }
+
+    // Fit the face within 78% of the narrowest wall half-width it overlaps.
+    const fitScale = (minHW * 0.78) / FACE_HALF_EXTENT;
+    const scale = Math.max(0.4, Math.min(naturalScale, fitScale));
 
     return { cx: 32, cy: faceY, scale };
   }

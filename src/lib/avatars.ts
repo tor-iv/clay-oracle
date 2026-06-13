@@ -385,11 +385,11 @@ export function parseShape(shape: string): ParsedShape {
           ? parsedWidths
           : resampleWidths(parsedWidths, expectedBands);
 
-      // Parse face — preset id or "draw:..." encoding
+      // Parse face — preset id, "draw:..." encoding, or "mii:..." encoding
       const rawFace = parts["face"];
       let face: FaceId | string;
-      if (rawFace.startsWith("draw:")) {
-        // Custom drawn face — keep as-is, validate it's well-formed below
+      if (rawFace.startsWith("draw:") || rawFace.startsWith("mii:")) {
+        // Custom drawn/mii face — keep as-is
         face = rawFace;
       } else {
         face = VALID_FACE_IDS.has(rawFace as FaceId) ? (rawFace as FaceId) : "none";
@@ -870,15 +870,15 @@ export function parseFaceDrawing(face: string): DrawStroke[] {
       let width: number | undefined;
       let ptStr = seg;
 
-      // Extract color
-      const cMatch = ptStr.match(/^c(#[0-9A-Fa-f]{6});/);
+      // Extract color (separator is "~"; also accept legacy ";")
+      const cMatch = ptStr.match(/^c(#[0-9A-Fa-f]{6})[~;]/);
       if (cMatch) {
         color = cMatch[1];
         ptStr = ptStr.slice(cMatch[0].length);
       }
 
-      // Extract width
-      const wMatch = ptStr.match(/^w([1-9]);/);
+      // Extract width (separator is "~"; also accept legacy ";")
+      const wMatch = ptStr.match(/^w([1-9])[~;]/);
       if (wMatch) {
         width = parseInt(wMatch[1], 10);
         ptStr = ptStr.slice(wMatch[0].length);
@@ -919,10 +919,12 @@ export function encodeFaceDrawing(strokes: DrawStroke[]): string {
       return pts;
     }
 
-    // v2 format with prefix(es)
+    // v2 format with prefix(es). Separator is "~" (NOT ";") because face
+    // strings are embedded into the thrown2 shape encoding, which uses ";"
+    // as its field delimiter — a ";" here would corrupt parseShape().
     let prefix = "";
-    if (hasCustomColor) prefix += `c${color};`;
-    if (hasCustomWidth) prefix += `w${width};`;
+    if (hasCustomColor) prefix += `c${color}~`;
+    if (hasCustomWidth) prefix += `w${width}~`;
     return `${prefix}${pts}`;
   });
   return `draw:${parts.join("|")}`;
@@ -942,6 +944,95 @@ export function parseDecorationDrawing(pattern: string): DrawStroke[] {
  */
 export function encodeDecorationDrawing(strokes: DrawStroke[]): string {
   return encodeFaceDrawing(strokes);
+}
+
+// ── Mii-style part-based face ─────────────────────────────────────────────
+// Format: mii:e{n}~b{n}~m{n}~c{n}~a{id}~i{hexNoHash}
+// No ";" or "," or "=" inside the value — safe to embed in thrown2 shape strings.
+
+export interface MiiFace {
+  eyes: number;
+  brows: number;
+  mouth: number;
+  cheeks: number;
+  accessory: string;
+  ink: string;
+}
+
+export const MII_EYES_COUNT = 6;
+export const MII_BROWS_COUNT = 5;
+export const MII_MOUTH_COUNT = 6;
+export const MII_CHEEKS_COUNT = 4;
+export const MII_ACCESSORY_IDS = ["none", "glasses", "sunglasses", "mustache", "star"] as const;
+
+export const DEFAULT_MII_FACE: MiiFace = {
+  eyes: 0,
+  brows: 0,
+  mouth: 0,
+  cheeks: 1,
+  accessory: "none",
+  ink: "#2C1810",
+};
+
+export function parseMiiFace(s: string): MiiFace {
+  const result: MiiFace = { ...DEFAULT_MII_FACE };
+  if (!s.startsWith("mii:")) return result;
+  const data = s.slice("mii:".length);
+  if (!data) return result;
+
+  for (const token of data.split("~")) {
+    if (!token) continue;
+    const key = token[0];
+    const val = token.slice(1);
+    switch (key) {
+      case "e": {
+        const n = parseInt(val, 10);
+        if (!isNaN(n)) result.eyes = Math.max(0, Math.min(MII_EYES_COUNT - 1, n));
+        break;
+      }
+      case "b": {
+        const n = parseInt(val, 10);
+        if (!isNaN(n)) result.brows = Math.max(0, Math.min(MII_BROWS_COUNT - 1, n));
+        break;
+      }
+      case "m": {
+        const n = parseInt(val, 10);
+        if (!isNaN(n)) result.mouth = Math.max(0, Math.min(MII_MOUTH_COUNT - 1, n));
+        break;
+      }
+      case "c": {
+        const n = parseInt(val, 10);
+        if (!isNaN(n)) result.cheeks = Math.max(0, Math.min(MII_CHEEKS_COUNT - 1, n));
+        break;
+      }
+      case "a": {
+        result.accessory = MII_ACCESSORY_IDS.includes(val as typeof MII_ACCESSORY_IDS[number])
+          ? val
+          : "none";
+        break;
+      }
+      case "i": {
+        // ink stored without leading #
+        if (/^[0-9A-Fa-f]{6}$/.test(val)) {
+          result.ink = `#${val}`;
+        }
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+export function encodeMiiFace(p: MiiFace): string {
+  const inkHex = p.ink.startsWith("#") ? p.ink.slice(1) : p.ink;
+  return [
+    `mii:e${p.eyes}`,
+    `b${p.brows}`,
+    `m${p.mouth}`,
+    `c${p.cheeks}`,
+    `a${p.accessory}`,
+    `i${inkHex}`,
+  ].join("~");
 }
 
 // ── Default ───────────────────────────────────────────────────────────────
