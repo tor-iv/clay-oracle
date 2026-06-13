@@ -9,14 +9,14 @@
 // ── Glaze hex map (matches AVATAR_GLAZES in avatars.ts) ──────────────────
 
 const GLAZE_HEX: Record<string, string> = {
-  terracotta:  "#B85C2A",
-  celadon:     "#A8C5A0",
-  cobalt:      "#4A7BAF",
-  ivory:       "#F0E6D0",
-  "sage-matte":  "#7A8C6E",
-  "blush-gloss": "#D4847A",
-  midnight:    "#2C3E50",
-  honey:       "#D4A840",
+  terracotta:    "#C1622E",
+  celadon:       "#8FB89A",
+  cobalt:        "#1F4E8C",
+  ivory:         "#EDE0C4",
+  "sage-matte":  "#6B7D5C",
+  "blush-gloss": "#D98B84",
+  midnight:      "#1A2640",
+  honey:         "#C98A1A",
 };
 
 // ── Colour math ───────────────────────────────────────────────────────────
@@ -205,6 +205,20 @@ export function extractSignals(shape: string, glaze: string, pattern: string): V
     }
   }
 
+  // ── Normalise pattern → just the style prefix ─────────────────────────────
+  // Rich patterns may be "dots:#ffffff:1.4" or "draw:..." encodings.
+  // scoreArchetype does exact comparisons (pattern === "dots"), so extract style only.
+  let patternStyle = pattern;
+  if (pattern.startsWith("draw:")) {
+    patternStyle = "draw"; // treat decoration as a distinct style
+  } else if (pattern.includes(":")) {
+    // style:color:scale → take style prefix
+    patternStyle = pattern.split(":")[0].trim() || pattern;
+  }
+  // Further normalise: if unrecognised, fall back to "plain"
+  const KNOWN_PATTERNS = new Set(["plain", "stripes", "dots", "squiggle", "flowers", "draw"]);
+  if (!KNOWN_PATTERNS.has(patternStyle)) patternStyle = "plain";
+
   return {
     height,
     bandCount,
@@ -216,7 +230,7 @@ export function extractSignals(shape: string, glaze: string, pattern: string): V
     sat,
     light,
     glazeRaw: glaze,
-    pattern,
+    pattern: patternStyle,
     faceKind,
   };
 }

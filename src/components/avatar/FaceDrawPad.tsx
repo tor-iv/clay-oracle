@@ -9,16 +9,26 @@ interface FaceDrawPadProps {
   onChange: (faceEncoding: string) => void;
   /** Initial strokes to populate (decoded from face string) */
   initialStrokes?: DrawStroke[];
+  /** Current glaze hex for including in the color palette */
+  glazeColor?: string;
 }
 
-const PAD_SIZE = 120; // px square canvas
-const INK_COLOR = "#2C1810";
+const PAD_SIZE = 160; // px square canvas (larger than before)
+const DEFAULT_INK = "#2C1810";
 
-// ── Stroke simplification (Ramer-Douglas-Peucker) ──────────────────────────
-function vecDist(
-  ax: number, ay: number,
-  bx: number, by: number
-): number {
+// ── Built-in palette ───────────────────────────────────────────────────────
+const PALETTE_COLORS = [
+  { id: "ink",    hex: "#2C1810", label: "Ink" },
+  { id: "rust",   hex: "#B84C2A", label: "Rust" },
+  { id: "sky",    hex: "#5B8EC4", label: "Sky" },
+  { id: "blush",  hex: "#D4847A", label: "Blush" },
+  { id: "sage",   hex: "#6B8F6A", label: "Sage" },
+  { id: "honey",  hex: "#C9901A", label: "Honey" },
+  { id: "white",  hex: "#F5F0E8", label: "White" },
+];
+
+// ── Stroke simplification (Ramer-Douglas-Peucker) ─────────────────────────
+function vecDist(ax: number, ay: number, bx: number, by: number): number {
   return Math.sqrt((bx - ax) ** 2 + (by - ay) ** 2);
 }
 
@@ -37,7 +47,6 @@ function perpendicularDist(
 function rdp(pts: number[], epsilon: number): number[] {
   if (pts.length < 4) return pts;
   const n = pts.length / 2;
-  // Find the point with the maximum distance
   let maxDist = 0;
   let maxIdx = 0;
   const ax = pts[0], ay = pts[1];
@@ -54,15 +63,40 @@ function rdp(pts: number[], epsilon: number): number[] {
   return [ax, ay, bx, by];
 }
 
-export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawPadProps) {
+// ── Brush size config ──────────────────────────────────────────────────────
+type BrushMode = "thin" | "medium" | "thick" | "eraser";
+
+const BRUSH_WIDTHS: Record<BrushMode, number> = {
+  thin:   1.6,
+  medium: 3.5,
+  thick:  6.0,
+  eraser: 14.0,
+};
+
+// Map display pixel widths to stored integer widths (1-9)
+const BRUSH_STORED_WIDTH: Record<Exclude<BrushMode, "eraser">, number> = {
+  thin:   1,
+  medium: 4,
+  thick:  8,
+};
+
+export default function FaceDrawPad({ onChange, initialStrokes = [], glazeColor }: FaceDrawPadProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [strokes, setStrokes] = useState<DrawStroke[]>(initialStrokes);
-  const [brushSize, setBrushSize] = useState<"thin" | "thick">("thin");
+  const [brushMode, setBrushMode] = useState<BrushMode>("thin");
+  const [activeColor, setActiveColor] = useState<string>(DEFAULT_INK);
+  const [customColor, setCustomColor] = useState<string>(DEFAULT_INK);
   const currentStrokeRef = useRef<number[]>([]);
   const isDrawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Draw all strokes onto canvas
+  // Build palette including glaze color if provided
+  const palette = glazeColor
+    ? [...PALETTE_COLORS, { id: "glaze", hex: glazeColor, label: "Glaze" }]
+    : PALETTE_COLORS;
+
+  // ── Canvas rendering ─────────────────────────────────────────────────────
+
   const redrawCanvas = useCallback((strokeList: DrawStroke[]) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -71,20 +105,23 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
 
     ctx.clearRect(0, 0, PAD_SIZE, PAD_SIZE);
 
-    // Background — faint parchment
-    ctx.fillStyle = "rgba(245,240,232,0.85)";
+    // Parchment background
+    ctx.fillStyle = "rgba(245,240,232,0.92)";
     ctx.fillRect(0, 0, PAD_SIZE, PAD_SIZE);
 
-    ctx.strokeStyle = INK_COLOR;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
     for (const stroke of strokeList) {
       const pts = stroke.points;
       if (pts.length < 4) continue;
-      ctx.lineWidth = (stroke as DrawStroke & { thick?: boolean }).thick ? 3.5 : 1.6;
+      const color = stroke.color ?? DEFAULT_INK;
+      const storedW = stroke.width ?? 1;
+      // Map stored 1-9 back to canvas px — thin=1.6, med=3.5, thick=6
+      const canvasPx = storedW <= 1 ? 1.6 : storedW <= 4 ? 3.5 : storedW <= 7 ? 6.0 : 6.0;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = canvasPx;
       ctx.beginPath();
-      // Dequantize from [0..100] face-zone space → canvas pixels
       ctx.moveTo(
         (pts[0] / 100) * PAD_SIZE,
         (pts[1] / 100) * PAD_SIZE
@@ -99,8 +136,6 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
     }
   }, []);
 
-  // Repaint whenever strokes change OR the parent re-renders (the browser
-  // clears the canvas pixel buffer on repaint, so we must redraw from state).
   useEffect(() => {
     redrawCanvas(strokes);
   }, [redrawCanvas, strokes]);
@@ -115,24 +150,68 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
     };
   }
 
+  // ── Eraser: find and remove the stroke nearest the touch point ────────────
+
+  function handleErase(x: number, y: number, strokeList: DrawStroke[]): DrawStroke[] {
+    // Find the stroke with any point within eraser radius
+    const ERASE_RADIUS = BRUSH_WIDTHS.eraser / 2;
+    const qx = (x / PAD_SIZE) * 100;
+    const qy = (y / PAD_SIZE) * 100;
+    const eR = (ERASE_RADIUS / PAD_SIZE) * 100;
+    let closestIdx = -1;
+    let closestDist = Infinity;
+
+    for (let si = 0; si < strokeList.length; si++) {
+      const pts = strokeList[si].points;
+      for (let i = 0; i + 1 < pts.length; i += 2) {
+        const d = Math.sqrt((pts[i] - qx) ** 2 + (pts[i + 1] - qy) ** 2);
+        if (d < eR && d < closestDist) {
+          closestDist = d;
+          closestIdx = si;
+        }
+      }
+    }
+
+    if (closestIdx >= 0) {
+      return strokeList.filter((_, i) => i !== closestIdx);
+    }
+    return strokeList;
+  }
+
+  // ── Pointer events ────────────────────────────────────────────────────────
+
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.preventDefault();
     canvasRef.current?.setPointerCapture(e.pointerId);
-    isDrawingRef.current = true;
     const { x, y } = getCanvasPos(e);
+
+    if (brushMode === "eraser") {
+      const updated = handleErase(x, y, strokes);
+      if (updated.length !== strokes.length) {
+        setStrokes(updated);
+        redrawCanvas(updated);
+        onChange(updated.length > 0 ? encodeFaceDrawing(updated) : "none");
+      }
+      isDrawingRef.current = true;
+      lastPointRef.current = { x, y };
+      return;
+    }
+
+    isDrawingRef.current = true;
     currentStrokeRef.current = [x, y];
     lastPointRef.current = { x, y };
 
-    // Draw a dot
+    // Paint a starting dot
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (ctx) {
-      ctx.strokeStyle = INK_COLOR;
+      const lw = BRUSH_WIDTHS[brushMode];
+      ctx.strokeStyle = activeColor;
+      ctx.fillStyle = activeColor;
       ctx.lineCap = "round";
-      ctx.lineWidth = brushSize === "thick" ? 3.5 : 1.6;
+      ctx.lineWidth = lw;
       ctx.beginPath();
-      ctx.arc(x, y, (brushSize === "thick" ? 1.75 : 0.8), 0, Math.PI * 2);
-      ctx.fillStyle = INK_COLOR;
+      ctx.arc(x, y, lw / 2, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -144,14 +223,27 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
     const last = lastPointRef.current;
     if (!last) return;
 
-    // Live draw onto canvas
+    if (brushMode === "eraser") {
+      // Erase on drag too
+      const updated = handleErase(x, y, strokes);
+      if (updated.length !== strokes.length) {
+        setStrokes(updated);
+        redrawCanvas(updated);
+        onChange(updated.length > 0 ? encodeFaceDrawing(updated) : "none");
+      }
+      lastPointRef.current = { x, y };
+      return;
+    }
+
+    // Live draw
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (ctx) {
-      ctx.strokeStyle = INK_COLOR;
+      const lw = BRUSH_WIDTHS[brushMode];
+      ctx.strokeStyle = activeColor;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.lineWidth = brushSize === "thick" ? 3.5 : 1.6;
+      ctx.lineWidth = lw;
       ctx.beginPath();
       ctx.moveTo(last.x, last.y);
       ctx.lineTo(x, y);
@@ -167,37 +259,49 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
     isDrawingRef.current = false;
     lastPointRef.current = null;
 
+    if (brushMode === "eraser") return;
+
     const rawPts = currentStrokeRef.current;
     currentStrokeRef.current = [];
 
     if (rawPts.length < 4) return;
 
-    // Simplify stroke (RDP epsilon = 2px)
-    const simplified = rdp(rawPts, 2.0);
+    // Simplify with RDP (epsilon = 1.5px for the 160px canvas)
+    const simplified = rdp(rawPts, 1.5);
 
-    // Quantize to [0..100] face-zone space (round to int)
+    // Quantize to [0..100] face-zone space
     const quantized = simplified.map((v, i) => {
-      // Even = x, odd = y
+      // Even = x, odd = y; both use PAD_SIZE
       return Math.round((v / PAD_SIZE) * 100);
     });
 
-    const newStroke: DrawStroke & { thick?: boolean } = {
+    const storedWidth = BRUSH_STORED_WIDTH[brushMode as Exclude<BrushMode, "eraser">] ?? 1;
+
+    const newStroke: DrawStroke = {
       points: quantized,
-      thick: brushSize === "thick",
+      color: activeColor,
+      width: storedWidth,
     };
 
-    // Cap total strokes at 12 and total points at 200
+    // Cap: max 20 strokes or 300 total points
     const updatedStrokes = [...strokes, newStroke];
-    // If too many points, remove oldest strokes
     let totalPts = updatedStrokes.reduce((sum, s) => sum + s.points.length, 0);
-    while (totalPts > 200 && updatedStrokes.length > 1) {
+    while (totalPts > 300 && updatedStrokes.length > 1) {
       const removed = updatedStrokes.shift()!;
       totalPts -= removed.points.length;
     }
-    if (updatedStrokes.length > 12) updatedStrokes.shift();
+    if (updatedStrokes.length > 20) updatedStrokes.shift();
 
     setStrokes(updatedStrokes);
     onChange(encodeFaceDrawing(updatedStrokes));
+  }
+
+  function handlePointerCancel() {
+    isDrawingRef.current = false;
+    lastPointRef.current = null;
+    currentStrokeRef.current = [];
+    // Redraw without the in-progress stroke
+    redrawCanvas(strokes);
   }
 
   function handleUndo() {
@@ -213,16 +317,104 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
     onChange("none");
   }
 
+  const isEraser = brushMode === "eraser";
+
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 8,
+        gap: 10,
       }}
     >
-      {/* Canvas */}
+      {/* ── Color palette ─────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          flexWrap: "wrap",
+          justifyContent: "center",
+        }}
+      >
+        {palette.map((c) => {
+          const isActive = !isEraser && activeColor === c.hex;
+          return (
+            <button
+              key={c.id}
+              type="button"
+              title={c.label}
+              aria-label={c.label}
+              aria-pressed={isActive}
+              onClick={() => {
+                setActiveColor(c.hex);
+                setBrushMode((prev) => prev === "eraser" ? "thin" : prev);
+              }}
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: "50%",
+                background: c.hex,
+                border: isActive ? "2.5px solid #2C1810" : "1.5px solid rgba(44,24,16,0.22)",
+                transform: isActive ? "scale(1.22)" : "scale(1)",
+                cursor: "pointer",
+                flexShrink: 0,
+                boxShadow: isActive ? "0 0 0 2px rgba(44,24,16,0.14)" : "none",
+                transition: "transform 0.1s, box-shadow 0.1s",
+                // White swatch needs a visible border
+                outline: c.hex === "#F5F0E8" ? "1px solid rgba(44,24,16,0.25)" : undefined,
+                outlineOffset: c.hex === "#F5F0E8" ? "-1px" : undefined,
+              }}
+            />
+          );
+        })}
+
+        {/* Custom color input */}
+        <label
+          title="Custom color"
+          aria-label="Custom color"
+          style={{
+            position: "relative",
+            width: 22,
+            height: 22,
+            borderRadius: "50%",
+            background: `conic-gradient(#C1622E, #C9901A, #6B8F6A, #5B8EC4, #D4847A, #C1622E)`,
+            border: (!isEraser && !palette.some((c) => c.hex === activeColor))
+              ? "2.5px solid #2C1810"
+              : "1.5px solid rgba(44,24,16,0.3)",
+            cursor: "pointer",
+            overflow: "hidden",
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <input
+            type="color"
+            value={customColor}
+            onChange={(e) => {
+              setCustomColor(e.target.value);
+              setActiveColor(e.target.value);
+              setBrushMode((prev) => prev === "eraser" ? "thin" : prev);
+            }}
+            style={{
+              position: "absolute",
+              inset: 0,
+              opacity: 0,
+              cursor: "pointer",
+              width: "100%",
+              height: "100%",
+              padding: 0,
+              border: "none",
+            }}
+            aria-label="Custom color picker"
+          />
+        </label>
+      </div>
+
+      {/* ── Canvas ────────────────────────────────────────────────────── */}
       <div
         style={{
           position: "relative",
@@ -239,22 +431,22 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
           style={{
             display: "block",
             touchAction: "none",
-            cursor: "crosshair",
+            cursor: isEraser ? "cell" : "crosshair",
             borderRadius: 8,
           }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
           aria-label="Draw your face"
         />
-        {/* Crosshair guide (faint center mark) */}
+        {/* Crosshair guide */}
         <svg
           style={{
             position: "absolute",
             inset: 0,
             pointerEvents: "none",
-            opacity: 0.12,
+            opacity: 0.10,
           }}
           width={PAD_SIZE}
           height={PAD_SIZE}
@@ -266,55 +458,70 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
         </svg>
       </div>
 
-      {/* Controls */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-        {/* Brush size */}
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <button
-            type="button"
-            onClick={() => setBrushSize("thin")}
-            aria-label="Thin brush"
-            aria-pressed={brushSize === "thin"}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: "50%",
-              border: brushSize === "thin" ? "2px solid #2C1810" : "1.5px solid rgba(44,24,16,0.25)",
-              background: brushSize === "thin" ? "rgba(184,92,42,0.12)" : "rgba(232,213,176,0.4)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 0,
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16">
-              <circle cx="8" cy="8" r="1.5" fill="#2C1810" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => setBrushSize("thick")}
-            aria-label="Thick brush"
-            aria-pressed={brushSize === "thick"}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: "50%",
-              border: brushSize === "thick" ? "2px solid #2C1810" : "1.5px solid rgba(44,24,16,0.25)",
-              background: brushSize === "thick" ? "rgba(184,92,42,0.12)" : "rgba(232,213,176,0.4)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 0,
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16">
-              <circle cx="8" cy="8" r="3.5" fill="#2C1810" />
-            </svg>
-          </button>
-        </div>
+      {/* ── Tool row: brush sizes + eraser + undo + clear ─────────────── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+        {/* Brush sizes */}
+        {(["thin", "medium", "thick"] as const).map((mode) => {
+          const isActive = brushMode === mode;
+          const dotR = mode === "thin" ? 2 : mode === "medium" ? 3.5 : 5.5;
+          return (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => {
+                setBrushMode(mode);
+              }}
+              aria-label={`${mode} brush`}
+              aria-pressed={isActive}
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: "50%",
+                border: isActive ? "2px solid #2C1810" : "1.5px solid rgba(44,24,16,0.25)",
+                background: isActive ? "rgba(184,92,42,0.14)" : "rgba(232,213,176,0.4)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 0,
+                transition: "transform 0.1s",
+                transform: isActive ? "scale(1.12)" : "scale(1)",
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18">
+                <circle cx="9" cy="9" r={dotR}
+                  fill={isActive ? "#2C1810" : "rgba(44,24,16,0.5)"}
+                />
+              </svg>
+            </button>
+          );
+        })}
+
+        {/* Eraser */}
+        <button
+          type="button"
+          onClick={() => setBrushMode("eraser")}
+          aria-label="Eraser"
+          aria-pressed={isEraser}
+          title="Eraser (removes the nearest stroke)"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            border: isEraser ? "2px solid #B85C2A" : "1.5px solid rgba(44,24,16,0.25)",
+            background: isEraser ? "rgba(184,92,42,0.18)" : "rgba(232,213,176,0.4)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+            fontSize: "0.85rem",
+            transition: "transform 0.1s",
+            transform: isEraser ? "scale(1.12)" : "scale(1)",
+          }}
+        >
+          ◻
+        </button>
 
         {/* Undo */}
         <button
@@ -323,16 +530,16 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
           disabled={strokes.length === 0}
           style={{
             fontFamily: "var(--font-hand)",
-            fontSize: "0.78rem",
+            fontSize: "0.76rem",
             color: strokes.length === 0 ? "rgba(44,24,16,0.3)" : "#5C3D2E",
             background: "rgba(232,213,176,0.4)",
             border: "1.5px solid rgba(44,24,16,0.2)",
             borderRadius: 7,
-            padding: "3px 10px",
+            padding: "3px 9px",
             cursor: strokes.length === 0 ? "default" : "pointer",
           }}
         >
-          ↩ undo
+          ↩
         </button>
 
         {/* Clear */}
@@ -342,29 +549,29 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
           disabled={strokes.length === 0}
           style={{
             fontFamily: "var(--font-hand)",
-            fontSize: "0.78rem",
+            fontSize: "0.76rem",
             color: strokes.length === 0 ? "rgba(44,24,16,0.3)" : "#B85C2A",
             background: "rgba(232,213,176,0.4)",
             border: "1.5px solid rgba(44,24,16,0.2)",
             borderRadius: 7,
-            padding: "3px 10px",
+            padding: "3px 9px",
             cursor: strokes.length === 0 ? "default" : "pointer",
           }}
         >
-          ✕ clear
+          ✕
         </button>
       </div>
 
       <p
         style={{
           fontFamily: "var(--font-hand)",
-          fontSize: "0.7rem",
-          color: "rgba(92,61,46,0.6)",
+          fontSize: "0.68rem",
+          color: "rgba(92,61,46,0.55)",
           textAlign: "center",
           margin: 0,
         }}
       >
-        draw in the box — your strokes go on the pot
+        draw a face — your strokes appear on the pot
       </p>
     </div>
   );

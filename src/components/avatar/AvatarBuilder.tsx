@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import VaseAvatar from "./VaseAvatar";
 import FaceDrawPad from "./FaceDrawPad";
+import DecoratePad from "./DecoratePad";
 import {
   AVATAR_SHAPES,
   AVATAR_GLAZES,
@@ -16,18 +17,23 @@ import {
   DEFAULT_THROWN2_WIDTHS,
   DEFAULT_THROWN2_H,
   parseFaceDrawing,
+  parseDecorationDrawing,
+  resolveGlaze,
+  parsePattern,
+  encodePattern,
 } from "@/lib/avatars";
 import type {
   AvatarShape,
   AvatarGlaze,
   AvatarPattern,
+  AvatarPatternStyle,
   FaceId,
 } from "@/lib/avatars";
 
 interface AvatarBuilderProps {
   defaultShape?:   AvatarShape;
   defaultGlaze?:   AvatarGlaze | string;
-  defaultPattern?: AvatarPattern;
+  defaultPattern?: AvatarPattern | string;
 }
 
 // ── Wheel shimmer animation keyframes (component-scoped) ──────────────────
@@ -183,7 +189,7 @@ interface WheelVasePreviewProps {
   h: number;
   widths: number[];
   glaze: string;
-  pattern: AvatarPattern;
+  pattern: string;
   face: FaceId | string;
   edges: number[];
   onHeightChange: (h: number) => void;
@@ -740,13 +746,14 @@ function FacePicker({
 }: {
   face: FaceId | string;
   glaze: string;
-  pattern: AvatarPattern;
+  pattern: string;
   thrown2H: number;
   thrown2Widths: number[];
   edges: number[];
   onFaceChange: (f: FaceId | string) => void;
 }) {
   const [drawMode, setDrawMode] = useState(false);
+  const glazeHex = resolveGlaze(glaze);
 
   function handlePresetClick(f: FaceId) {
     setDrawMode(false);
@@ -854,6 +861,7 @@ function FacePicker({
         >
           <FaceDrawPad
             onChange={handleDrawChange}
+            glazeColor={glazeHex}
             initialStrokes={
               typeof face === "string" && face.startsWith("draw:")
                 ? parseFaceDrawing(face)
@@ -863,6 +871,237 @@ function FacePicker({
         </div>
       )}
 
+    </div>
+  );
+}
+
+// ── PatternPicker ─────────────────────────────────────────────────────────
+
+function PatternPicker({
+  pattern,
+  glaze,
+  shapeStr,
+  onPatternChange,
+}: {
+  pattern: string;
+  glaze: string;
+  shapeStr: string;
+  onPatternChange: (p: string) => void;
+}) {
+  const parsedPat = parsePattern(pattern);
+  const activeStyle = parsedPat.style;
+  const activeColor = parsedPat.color ?? "";
+  const activeScale = parsedPat.scale ?? 1.0;
+  const [decorateMode, setDecorateMode] = useState(pattern.startsWith("draw:"));
+  const glazeHex = resolveGlaze(glaze);
+
+  // Non-draw presets (excluding "draw" from the pill list — handled separately)
+  const presetPatterns = AVATAR_PATTERNS.filter((p) => p.id !== "draw");
+
+  function buildPattern(style: AvatarPatternStyle, color: string, scale: number): string {
+    if (style === "plain") return "plain";
+    // Only encode color/scale if they're non-default
+    const hasColor = color && /^#[0-9A-Fa-f]{6}$/.test(color);
+    const hasScale = Math.abs(scale - 1.0) > 0.04;
+    if (!hasColor && !hasScale) return style;
+    return encodePattern({ style, color: hasColor ? color : undefined, scale: hasScale ? scale : undefined });
+  }
+
+  function handleStyleClick(style: AvatarPatternStyle) {
+    setDecorateMode(false);
+    onPatternChange(buildPattern(style, activeColor, activeScale));
+  }
+
+  function handleColorChange(hex: string) {
+    if (activeStyle === "plain" || activeStyle === "draw") return;
+    onPatternChange(buildPattern(activeStyle, hex, activeScale));
+  }
+
+  function handleScaleChange(scale: number) {
+    if (activeStyle === "plain" || activeStyle === "draw") return;
+    onPatternChange(buildPattern(activeStyle, activeColor, scale));
+  }
+
+  function handleDecorateToggle() {
+    const newMode = !decorateMode;
+    setDecorateMode(newMode);
+    if (!newMode) {
+      // Return to plain when exiting decorate mode
+      onPatternChange("plain");
+    }
+  }
+
+  function handleDecorationChange(enc: string) {
+    onPatternChange(enc);
+  }
+
+  const showCustomize = activeStyle !== "plain" && !decorateMode;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Preset pills + draw button */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-start" }}>
+        {presetPatterns.map((p) => {
+          const isSelected = !decorateMode && activeStyle === p.id;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => handleStyleClick(p.id)}
+              aria-label={p.label}
+              aria-pressed={isSelected}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 3,
+                padding: "6px 8px",
+                borderRadius: 10,
+                background: isSelected ? "rgba(184,92,42,0.12)" : "rgba(232,213,176,0.3)",
+                border: isSelected ? "2px solid #2C1810" : "2px solid transparent",
+                cursor: "pointer",
+                transform: isSelected ? "scale(1.08)" : "scale(1)",
+                transition: "transform 0.1s ease",
+              }}
+            >
+              <VaseAvatar
+                shape={shapeStr}
+                glaze={glaze}
+                pattern={p.id}
+                size={34}
+              />
+              <span
+                className="text-xs leading-none"
+                style={{ fontFamily: "var(--font-hand)", color: "var(--color-clay-ink-muted)" }}
+              >
+                {p.label}
+              </span>
+            </button>
+          );
+        })}
+
+        {/* Draw/Decorate toggle */}
+        <button
+          type="button"
+          onClick={handleDecorateToggle}
+          aria-pressed={decorateMode}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 3,
+            padding: "6px 8px",
+            borderRadius: 10,
+            background: decorateMode ? "rgba(212,168,64,0.15)" : "rgba(232,213,176,0.3)",
+            border: decorateMode ? "2px solid #D4A840" : "2px dashed rgba(44,24,16,0.25)",
+            cursor: "pointer",
+            transform: decorateMode ? "scale(1.05)" : "scale(1)",
+            transition: "transform 0.12s ease, border-color 0.12s",
+          }}
+        >
+          <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
+            <rect width="34" height="34" rx="8" fill="rgba(245,240,232,0.6)" />
+            <path d="M 7 24 C 10 18 13 20 17 17 C 21 14 23 10 27 8" stroke="#B85C2A" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+            <circle cx="11" cy="13" r="2" fill="#5B8EC4" fillOpacity="0.7" />
+            <circle cx="22" cy="20" r="1.5" fill="#C9901A" fillOpacity="0.7" />
+          </svg>
+          <span
+            className="text-xs leading-none"
+            style={{ fontFamily: "var(--font-hand)", color: decorateMode ? "#D4A840" : "var(--color-clay-ink-muted)" }}
+          >
+            ✏️ draw
+          </span>
+        </button>
+      </div>
+
+      {/* Pattern customization: color swatch + scale slider */}
+      {showCustomize && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+            background: "rgba(232,213,176,0.3)",
+            borderRadius: 10,
+            padding: "8px 12px",
+            border: "1.5px dashed rgba(44,24,16,0.18)",
+          }}
+        >
+          {/* Color picker */}
+          <label
+            title="Pattern color"
+            style={{
+              position: "relative",
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              background: activeColor || glazeHex,
+              border: "2px solid rgba(44,24,16,0.3)",
+              cursor: "pointer",
+              overflow: "hidden",
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <span style={{
+              fontFamily: "var(--font-hand)", fontSize: "0.6rem",
+              color: "rgba(44,24,16,0.7)", background: "rgba(245,240,232,0.7)",
+              borderRadius: 3, padding: "1px 2px", pointerEvents: "none",
+            }}>🎨</span>
+            <input
+              type="color"
+              value={activeColor || glazeHex}
+              onChange={(e) => handleColorChange(e.target.value)}
+              style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%", padding: 0, border: "none" }}
+              aria-label="Pattern color"
+            />
+          </label>
+
+          {/* Scale slider */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 100 }}>
+            <span style={{ fontFamily: "var(--font-hand)", fontSize: "0.68rem", color: "var(--color-clay-ink-muted)" }}>
+              density · {activeScale.toFixed(1)}×
+            </span>
+            <input
+              type="range"
+              min="0.4"
+              max="2.5"
+              step="0.1"
+              value={activeScale}
+              onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
+              style={{ width: "100%", cursor: "pointer", accentColor: "#B85C2A" }}
+              aria-label="Pattern density"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Decoration draw pad */}
+      {decorateMode && (
+        <div
+          style={{
+            background: "rgba(232,213,176,0.2)",
+            borderRadius: 12,
+            padding: "12px 12px 8px",
+            border: "1.5px dashed rgba(44,24,16,0.2)",
+          }}
+        >
+          <DecoratePad
+            onChange={handleDecorationChange}
+            shapeStr={shapeStr}
+            glaze={glaze}
+            glazeColor={glazeHex}
+            initialStrokes={
+              pattern.startsWith("draw:")
+                ? parseDecorationDrawing(pattern)
+                : []
+            }
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -884,7 +1123,8 @@ export default function AvatarBuilder({
 
   // Glaze: can be a preset id or a raw hex
   const [glaze, setGlaze]     = useState<string>(defaultGlaze as string);
-  const [pattern, setPattern] = useState<AvatarPattern>(defaultPattern);
+  // Pattern: can be a preset id, a richer "style:#hex:scale" string, or a "draw:..." decoration
+  const [pattern, setPattern] = useState<string>(defaultPattern as string ?? DEFAULT_AVATAR.pattern);
 
   // Classic preset state
   const [classicShape, setClassicShape] = useState<string>(defaultShape as string);
@@ -934,7 +1174,7 @@ export default function AvatarBuilder({
     setFace("happy");
     setEdges(defaultEdges(defaultBands));
     setGlaze(DEFAULT_AVATAR.glaze);
-    setPattern(DEFAULT_AVATAR.pattern);
+    setPattern("plain");
   }
 
   function switchToClassic(id: string) {
@@ -1134,38 +1374,12 @@ export default function AvatarBuilder({
         >
           Pattern
         </h4>
-        <div className="flex flex-wrap gap-2">
-          {AVATAR_PATTERNS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setPattern(p.id)}
-              aria-label={p.label}
-              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg"
-              style={{
-                background: pattern === p.id ? "rgba(184,92,42,0.12)" : "rgba(232,213,176,0.3)",
-                border: pattern === p.id ? "2px solid #2C1810" : "2px solid transparent",
-                transform: pattern === p.id ? "scale(1.08)" : "scale(1)",
-                cursor: "pointer",
-                transition: "transform 0.1s ease",
-              }}
-              aria-pressed={pattern === p.id}
-            >
-              <VaseAvatar
-                shape={mode === "throw" ? encodeThrown2Shape(thrown2H, thrown2Widths, face as FaceId, edges) : classicShape}
-                glaze={glaze}
-                pattern={p.id}
-                size={34}
-              />
-              <span
-                className="text-xs leading-none"
-                style={{ fontFamily: "var(--font-hand)", color: "var(--color-clay-ink-muted)" }}
-              >
-                {p.label}
-              </span>
-            </button>
-          ))}
-        </div>
+        <PatternPicker
+          pattern={pattern}
+          glaze={glaze}
+          shapeStr={shapeValue}
+          onPatternChange={setPattern}
+        />
       </section>
 
       {/* ── Classic shapes disclosure ──────────────────────────────────────── */}

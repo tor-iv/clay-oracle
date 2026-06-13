@@ -25,16 +25,21 @@ export type AvatarGlaze =
   | "midnight"
   | "honey";
 
-export type AvatarPattern =
+export type AvatarPatternStyle =
   | "plain"
   | "stripes"
   | "dots"
   | "squiggle"
-  | "flowers";
+  | "flowers"
+  | "draw";
+
+// AvatarPattern is widened: still accepts preset ids, but also richer strings like
+// "dots:#ffffff:1.4" (style:hexcolor:scale) or "draw:..." decoration encodings.
+export type AvatarPattern = AvatarPatternStyle | (string & Record<never, never>);
 
 export interface Avatar {
   shape: AvatarShape;
-  glaze: AvatarGlaze;
+  glaze: AvatarGlaze | string;
   pattern: AvatarPattern;
 }
 
@@ -95,20 +100,20 @@ export interface AvatarGlazeData {
 }
 
 export const AVATAR_GLAZES: AvatarGlazeData[] = [
-  { id: "terracotta", label: "Terracotta",  fill: "#B85C2A" },
-  { id: "celadon",    label: "Celadon",     fill: "#A8C5A0" },
-  { id: "cobalt",     label: "Cobalt Blue", fill: "#4A7BAF" },
-  { id: "ivory",      label: "Ivory",       fill: "#F0E6D0" },
-  { id: "sage-matte", label: "Sage Matte",  fill: "#7A8C6E" },
-  { id: "blush-gloss",label: "Blush Gloss", fill: "#D4847A" },
-  { id: "midnight",   label: "Midnight",    fill: "#2C3E50" },
-  { id: "honey",      label: "Honey",       fill: "#D4A840" },
+  { id: "terracotta", label: "Terracotta",  fill: "#C1622E" },
+  { id: "celadon",    label: "Celadon",     fill: "#8FB89A" },
+  { id: "cobalt",     label: "Cobalt Blue", fill: "#1F4E8C" },
+  { id: "ivory",      label: "Ivory",       fill: "#EDE0C4" },
+  { id: "sage-matte", label: "Sage Matte",  fill: "#6B7D5C" },
+  { id: "blush-gloss",label: "Blush Gloss", fill: "#D98B84" },
+  { id: "midnight",   label: "Midnight",    fill: "#1A2640" },
+  { id: "honey",      label: "Honey",       fill: "#C98A1A" },
 ];
 
 // ── Patterns ──────────────────────────────────────────────────────────────
 
 export interface AvatarPatternData {
-  id: AvatarPattern;
+  id: AvatarPatternStyle;
   label: string;
 }
 
@@ -118,7 +123,91 @@ export const AVATAR_PATTERNS: AvatarPatternData[] = [
   { id: "dots",     label: "Dots" },
   { id: "squiggle", label: "Squiggle" },
   { id: "flowers",  label: "Flowers" },
+  { id: "draw",     label: "Draw" },
 ];
+
+// ── ParsedPattern ─────────────────────────────────────────────────────────
+
+export interface ParsedPattern {
+  /** The base pattern style */
+  style: AvatarPatternStyle;
+  /** Optional custom hex color for the pattern marks */
+  color?: string;
+  /** Optional scale/density multiplier (default 1.0) */
+  scale?: number;
+  /** If style === "draw", the full raw pattern string (including "draw:...") */
+  drawData?: string;
+}
+
+/**
+ * Parse a pattern value that may be:
+ *   - A plain preset id: "dots" → { style: "dots" }
+ *   - A richer form: "dots:#ffffff:1.4" → { style: "dots", color: "#ffffff", scale: 1.4 }
+ *   - A draw pattern: "draw:x1,y1,...|..." → { style: "draw", drawData: "draw:..." }
+ *   - Unknown → falls back to { style: "plain" }
+ * Backward compatible: plain ids still work fine.
+ */
+const PRESET_PATTERN_STYLES = new Set<string>(["plain", "stripes", "dots", "squiggle", "flowers"]);
+
+export function parsePattern(raw: string): ParsedPattern {
+  if (!raw) return { style: "plain" };
+
+  // draw decoration pattern
+  if (raw.startsWith("draw:")) {
+    return { style: "draw", drawData: raw };
+  }
+
+  // Try split on ":" — style:color:scale
+  const parts = raw.split(":");
+  const styleRaw = parts[0].trim();
+
+  // Validate style
+  const style: AvatarPatternStyle = PRESET_PATTERN_STYLES.has(styleRaw)
+    ? (styleRaw as AvatarPatternStyle)
+    : "plain";
+
+  if (parts.length === 1) {
+    // Plain id, no extra fields
+    return { style };
+  }
+
+  // parts[1] = hex color (optional)
+  let color: string | undefined;
+  if (parts[1] && /^#[0-9A-Fa-f]{3,6}$/.test(parts[1].trim())) {
+    color = parts[1].trim();
+    // Expand shorthand
+    if (color.length === 4) {
+      color = `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`;
+    }
+  }
+
+  // parts[2] = scale (optional)
+  let scale: number | undefined;
+  if (parts[2]) {
+    const s = parseFloat(parts[2].trim());
+    if (!isNaN(s) && s > 0) scale = Math.max(0.3, Math.min(4.0, s));
+  }
+
+  return { style, color, scale };
+}
+
+/**
+ * Encode a parsed pattern back to its string form.
+ * If only style (no color or scale), returns just the style id for max compat.
+ */
+export function encodePattern(p: ParsedPattern): string {
+  if (p.style === "draw" && p.drawData) return p.drawData;
+  if (!p.color && !p.scale) return p.style;
+  const colorPart = p.color ?? "";
+  const scalePart = p.scale !== undefined ? p.scale.toFixed(2) : "";
+  return `${p.style}:${colorPart}:${scalePart}`;
+}
+
+// ── parseDecorationDrawing ────────────────────────────────────────────────
+// Decoration strokes use the same polyline encoding as face strokes,
+// but live in the pattern field prefixed with "draw:".
+// Re-uses DrawStroke + parseFaceDrawing / encodeFaceDrawing under the hood.
+// Alias helpers for semantic clarity at call sites.
 
 // ── Faces ─────────────────────────────────────────────────────────────────
 
@@ -742,36 +831,116 @@ export function resolveGlaze(glaze: string): string {
 // ── parseFaceDrawing ──────────────────────────────────────────────────────
 
 export interface DrawStroke {
-  /** Points as flat [x, y, x, y, ...] integers in face-zone space */
+  /** Points as flat [x, y, x, y, ...] integers in face-zone space (0..100) */
   points: number[];
+  /**
+   * Stroke color as a hex string (e.g. "#2C1810").
+   * Defaults to ink "#2C1810" when absent (backward compat with old draw strings).
+   */
+  color?: string;
+  /**
+   * Stroke width in canvas pixels at the reference canvas size.
+   * Defaults to 1 (thin) when absent. Stored as an integer 1..9.
+   */
+  width?: number;
 }
 
 /**
  * Parse a "draw:..." face string into an array of strokes.
- * Format: draw:x1,y1,x2,y2,...|x1,y1,...
- * Each pipe-delimited segment is one polyline; points are comma-joined integers.
+ *
+ * NEW format (v2): each pipe-delimited segment carries optional color+width prefix:
+ *   c#rrggbb;w3;x1,y1,x2,y2,...
+ * where `c` = color prefix, `w` = width prefix, then comma-joined points.
+ *
+ * OLD format (v1, backward-compatible): each segment is just comma-joined integers.
+ *   x1,y1,x2,y2,...
+ * Old segments default to color="#2C1810" and width=1.
  */
 export function parseFaceDrawing(face: string): DrawStroke[] {
   if (!face.startsWith("draw:")) return [];
   const data = face.slice("draw:".length);
   if (!data) return [];
+
   return data.split("|").map((seg) => {
+    // Detect new v2 format: starts with 'c' or 'w' metadata prefix
+    if (seg.startsWith("c") || seg.startsWith("w")) {
+      // Format: cHEX;wN;x1,y1,...  (each field is optional but order: c then w then pts)
+      let color: string | undefined;
+      let width: number | undefined;
+      let ptStr = seg;
+
+      // Extract color
+      const cMatch = ptStr.match(/^c(#[0-9A-Fa-f]{6});/);
+      if (cMatch) {
+        color = cMatch[1];
+        ptStr = ptStr.slice(cMatch[0].length);
+      }
+
+      // Extract width
+      const wMatch = ptStr.match(/^w([1-9]);/);
+      if (wMatch) {
+        width = parseInt(wMatch[1], 10);
+        ptStr = ptStr.slice(wMatch[0].length);
+      }
+
+      const pts = ptStr.split(",").map(Number).filter((v) => !isNaN(v));
+      return { points: pts, color, width } satisfies DrawStroke;
+    }
+
+    // Old v1 format — plain point list, defaults applied
     const pts = seg.split(",").map(Number).filter((v) => !isNaN(v));
-    return { points: pts };
+    return { points: pts } satisfies DrawStroke;
   }).filter((s) => s.points.length >= 4);
 }
 
 /**
  * Encode an array of strokes to a "draw:..." face string.
- * Points are rounded to integers; long strokes are capped at 64 points (32 xy pairs).
+ *
+ * Strokes with non-default color or width use the v2 format prefix.
+ * Strokes with default ink + thin use the v1 format for compactness.
+ * Points are rounded to integers; each stroke is capped at 64 points (32 xy pairs).
+ * Total strokes capped at 20.
  */
 export function encodeFaceDrawing(strokes: DrawStroke[]): string {
-  const parts = strokes.map((s) => {
-    // Cap at 64 values (32 points) per stroke
-    const pts = s.points.slice(0, 64).map(Math.round);
-    return pts.join(",");
+  const DEFAULT_COLOR = "#2C1810";
+  const DEFAULT_WIDTH = 1;
+
+  const parts = strokes.slice(0, 20).map((s) => {
+    const pts = s.points.slice(0, 64).map(Math.round).join(",");
+    const color = s.color ?? DEFAULT_COLOR;
+    const width = Math.max(1, Math.min(9, Math.round(s.width ?? DEFAULT_WIDTH)));
+
+    const hasCustomColor = color !== DEFAULT_COLOR;
+    const hasCustomWidth = width !== DEFAULT_WIDTH;
+
+    if (!hasCustomColor && !hasCustomWidth) {
+      // v1 compact format — backward compatible
+      return pts;
+    }
+
+    // v2 format with prefix(es)
+    let prefix = "";
+    if (hasCustomColor) prefix += `c${color};`;
+    if (hasCustomWidth) prefix += `w${width};`;
+    return `${prefix}${pts}`;
   });
   return `draw:${parts.join("|")}`;
+}
+
+/**
+ * Parse decoration draw strokes from a pattern string that starts with "draw:".
+ * Shares the same encoding as face draw strings.
+ */
+export function parseDecorationDrawing(pattern: string): DrawStroke[] {
+  return parseFaceDrawing(pattern);
+}
+
+/**
+ * Encode decoration draw strokes into the "draw:..." pattern string.
+ * Shares the same encoding as face draw strings.
+ */
+export function encodeDecorationDrawing(strokes: DrawStroke[]): string {
+  return encodeFaceDrawing(strokes);
 }
 
 // ── Default ───────────────────────────────────────────────────────────────
