@@ -14,6 +14,7 @@ export const pots = sqliteTable(
     reading:     text("reading").notNull(),
     name:        text("name"),
     playlist_url: text("playlist_url"), // optional Spotify embed override
+    tracklist:   text("tracklist"),     // JSON-encoded PlaylistTrack[] from Spotify
     created_at:  integer("created_at").notNull(),
   },
   (table) => [

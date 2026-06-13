@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ARCHETYPES } from "@/lib/personality";
+import type { PlaylistTrack } from "@/lib/playlist";
 import VaseAvatar from "@/components/avatar/VaseAvatar";
 import WobblyCard from "@/components/ui/WobblyCard";
 import HandInput from "@/components/ui/HandInput";
@@ -72,6 +73,27 @@ export default async function ResultPage({
   const archetype = ARCHETYPES.find((a) => a.id === pot.archetype_id) ?? ARCHETYPES[0];
   const nameAction = nameOnShelfAction.bind(null, id);
   const playlistAction = setPlaylistAction.bind(null, id);
+
+  // Parse stored tracklist defensively.
+  let tracks: PlaylistTrack[] = [];
+  if (pot.tracklist) {
+    try {
+      const parsed: unknown = JSON.parse(pot.tracklist);
+      if (Array.isArray(parsed)) {
+        tracks = parsed as PlaylistTrack[];
+      }
+    } catch {
+      // Malformed JSON — fall back to empty list.
+    }
+  }
+
+  // Determine display mode:
+  //   override   → user pasted their own Spotify link → show that embed
+  //   tracklist  → real per-pot tracks resolved → show track list
+  //   default    → archetype editorial playlist embed
+  const hasOverride  = Boolean(pot.playlist_url);
+  const hasTracks    = !hasOverride && tracks.length > 0;
+  const firstTracked = tracks.find((t) => t.spotifyId !== null) ?? null;
 
   return (
     <main
@@ -182,21 +204,177 @@ export default async function ResultPage({
           </p>
         </WobblyCard>
 
-        {/* ── Spotify playlist (custom override, else archetype default) ── */}
-        <div className="mb-3 overflow-hidden rounded-xl" style={{ border: "2px solid var(--color-clay-ink)" }}>
-          <iframe
-            src={`https://open.spotify.com/embed/${
-              pot.playlist_url ?? `playlist/${archetype.playlistId}`
-            }?utm_source=oembed`}
-            width="100%"
-            height="152"
-            frameBorder={0}
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            loading="lazy"
-            style={{ display: "block", borderRadius: 10 }}
-            title={pot.playlist_url ? "your soundtrack" : `${archetype.name} playlist`}
-          />
-        </div>
+        {/* ── Spotify section ────────────────────────────────────────── */}
+        {hasTracks ? (
+          /* ── Real per-pot tracklist ─────────────────────────────── */
+          <WobblyCard tone="warm" className="mb-3">
+            {/* Optional single-track embed at the top for instant play */}
+            {firstTracked && (
+              <div className="mb-4 overflow-hidden rounded-xl" style={{ border: "1.5px solid var(--color-clay-ink)" }}>
+                <iframe
+                  src={`https://open.spotify.com/embed/track/${firstTracked.spotifyId}?utm_source=oembed`}
+                  width="100%"
+                  height="80"
+                  frameBorder={0}
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                  loading="lazy"
+                  style={{ display: "block", borderRadius: 10 }}
+                  title={`${firstTracked.title} — ${firstTracked.artist}`}
+                />
+              </div>
+            )}
+
+            {/* Heading */}
+            <div
+              style={{
+                fontFamily: "var(--font-hand)",
+                fontSize: "1.1rem",
+                fontWeight: 700,
+                color: archetype.accentHex,
+                marginBottom: "0.75rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.4em",
+              }}
+            >
+              <DoodleIcon name="moon" size={18} color={archetype.accentHex} />
+              your pot playlist
+            </div>
+
+            {/* Track list */}
+            <ol
+              style={{
+                listStyle: "none",
+                padding: 0,
+                margin: 0,
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.55rem",
+              }}
+            >
+              {tracks.map((track, i) => {
+                const inner = (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.65rem",
+                    }}
+                  >
+                    {/* Album art or placeholder */}
+                    {track.albumArt ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={track.albumArt}
+                        alt=""
+                        width={40}
+                        height={40}
+                        style={{
+                          borderRadius: 6,
+                          flexShrink: 0,
+                          objectFit: "cover",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: 6,
+                          flexShrink: 0,
+                          background: "var(--color-clay-parchment, #F5F0E8)",
+                          border: "1.5px solid var(--color-clay-ink)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <DoodleIcon name="pot" size={20} color="var(--color-clay-ink-muted)" />
+                      </div>
+                    )}
+
+                    {/* Title + artist */}
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontFamily: "var(--font-body)",
+                          fontSize: "0.9rem",
+                          fontWeight: 600,
+                          color: "var(--color-clay-ink)",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {track.title}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: "var(--font-body)",
+                          fontSize: "0.8rem",
+                          color: "var(--color-clay-ink-muted)",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {track.artist}
+                      </div>
+                    </div>
+                  </div>
+                );
+
+                return (
+                  <li key={i}>
+                    {track.url ? (
+                      <a
+                        href={track.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: "block",
+                          borderRadius: 8,
+                          padding: "0.3rem 0.4rem",
+                          transition: "background 0.15s",
+                          textDecoration: "none",
+                        }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLElement).style.background =
+                            "rgba(0,0,0,0.05)";
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLElement).style.background =
+                            "transparent";
+                        }}
+                      >
+                        {inner}
+                      </a>
+                    ) : (
+                      <div style={{ padding: "0.3rem 0.4rem" }}>{inner}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </WobblyCard>
+        ) : (
+          /* ── Archetype editorial playlist / user override embed ─── */
+          <div className="mb-3 overflow-hidden rounded-xl" style={{ border: "2px solid var(--color-clay-ink)" }}>
+            <iframe
+              src={`https://open.spotify.com/embed/${
+                pot.playlist_url ?? `playlist/${archetype.playlistId}`
+              }?utm_source=oembed`}
+              width="100%"
+              height="152"
+              frameBorder={0}
+              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+              loading="lazy"
+              style={{ display: "block", borderRadius: 10 }}
+              title={pot.playlist_url ? "your soundtrack" : `${archetype.name} playlist`}
+            />
+          </div>
+        )}
 
         {/* Set your own soundtrack */}
         <form action={playlistAction} className="mb-6 flex flex-col gap-2 sm:flex-row">

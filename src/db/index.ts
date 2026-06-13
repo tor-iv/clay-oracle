@@ -43,6 +43,13 @@ function createDb() {
     // column already exists — fine
   }
 
+  // Migration for DBs created before tracklist existed (ignore if present).
+  try {
+    sqlite.exec("ALTER TABLE pots ADD COLUMN tracklist TEXT");
+  } catch {
+    // column already exists — fine
+  }
+
   return drizzle(sqlite, { schema });
 }
 

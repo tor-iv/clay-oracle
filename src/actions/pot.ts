@@ -14,6 +14,7 @@ import {
 } from "@/lib/avatars";
 import { readVase } from "@/lib/personality";
 import { generateReading } from "@/lib/reading";
+import { buildPotPlaylist } from "@/lib/playlist";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -65,21 +66,17 @@ export async function readPotAction(formData: FormData): Promise<void> {
   const rawShape   = String(formData.get("shape")   ?? "");
   const rawGlaze   = String(formData.get("glaze")   ?? "");
   const rawPattern = String(formData.get("pattern") ?? "");
-  const rawThrow   = String(formData.get("throw")   ?? "");
 
   const shape   = canonShape(rawShape);
   const glaze   = canonGlaze(rawGlaze);
   const pattern = canonPattern(rawPattern);
 
-  // Parse optional throw quality score (0..1) from hard mode.
-  // Easy mode does not send this field → undefined → readVase defaults to neutral.
-  const throwScore = rawThrow
-    ? Math.max(0, Math.min(1, parseFloat(rawThrow) || 0.7))
-    : undefined;
-
-  // Personality + reading
-  const { archetype, traits } = readVase(shape, glaze, pattern, throwScore);
-  const reading = await generateReading(traits, archetype);
+  // Personality + reading + playlist (run concurrently for speed)
+  const { archetype, traits } = readVase(shape, glaze, pattern);
+  const [reading, tracks] = await Promise.all([
+    generateReading(traits, archetype),
+    buildPotPlaylist(traits, archetype),
+  ]);
 
   // Persist
   const id = nanoid();
@@ -90,6 +87,7 @@ export async function readPotAction(formData: FormData): Promise<void> {
     pattern,
     archetype_id: archetype.id,
     reading,
+    tracklist: tracks.length ? JSON.stringify(tracks) : null,
     created_at: Date.now(),
   });
 
