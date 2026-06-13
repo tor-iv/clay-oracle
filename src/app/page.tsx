@@ -1,8 +1,9 @@
 import AvatarBuilder from "@/components/avatar/AvatarBuilder";
 import InkButton from "@/components/ui/InkButton";
 import DoodleIcon from "@/components/ui/DoodleIcon";
+import { readPotAction } from "@/actions/pot";
 
-// Sculpt landing — throw a pot, then "read my pot" (action wired in Phase 3).
+// Sculpt landing — throw a pot, then "read my pot".
 export default function Home() {
   return (
     <main className="flex flex-col items-center px-4 py-8 sm:py-12 min-h-screen">
@@ -31,7 +32,7 @@ export default function Home() {
           </p>
         </div>
 
-        <form className="flex flex-col gap-6">
+        <form action={readPotAction} className="flex flex-col gap-6">
           <AvatarBuilder />
           <div className="flex justify-center">
             <InkButton type="submit" variant="primary" className="w-full">
