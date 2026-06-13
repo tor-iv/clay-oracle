@@ -157,7 +157,7 @@ export interface ThrownParams {
 const VALID_FACE_IDS = new Set<FaceId>(["none", "happy", "sleepy", "winky", "surprised"]);
 const PRESET_IDS = new Set<string>(AVATAR_SHAPES.map((s) => s.id));
 
-function clamp01(v: number): number {
+export function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
@@ -188,7 +188,7 @@ export function parseEdge(raw: string | undefined): number {
 export type ParsedShape =
   | { kind: "preset"; id: PresetShapeId }
   | { kind: "thrown"; params: ThrownParams; face: FaceId }
-  | { kind: "thrown2"; h: number; widths: number[]; face: FaceId; edge: number };
+  | { kind: "thrown2"; h: number; widths: number[]; face: FaceId; edges: number[] };
 
 /** Parse an avatar_shape string to either a preset or thrown shape. */
 export function parseShape(shape: string): ParsedShape {
@@ -256,7 +256,11 @@ export function parseShape(shape: string): ParsedShape {
     }
   }
 
-  // thrown2 encoding: thrown2:h=0.85;w=0.45,0.72,0.91,0.66,0.38;edge=round;face=happy
+  // thrown2 encoding:
+  //   thrown2:h=0.85;w=0.45,0.72,0.91,0.66,0.38;edge=0,1,0.5,...;face=happy
+  //   edge can be a single 0..1 number (old form, applied to all bands) or
+  //   a comma-joined array of per-band values (new form).
+  //   face can be a preset id ("happy") or a draw string ("draw:x1,y1,...|...")
   if (shape.startsWith("thrown2:")) {
     try {
       const rest = shape.slice("thrown2:".length);
@@ -279,8 +283,8 @@ export function parseShape(shape: string): ParsedShape {
         const n = parseFloat(v);
         return isNaN(n) ? null : clamp01(n);
       });
-      // Accept 2..6 width entries
-      if (rawWidths.some((v) => v === null) || rawWidths.length < 2 || rawWidths.length > 6) {
+      // Accept 2..7 width entries (expanded from 6)
+      if (rawWidths.some((v) => v === null) || rawWidths.length < 2 || rawWidths.length > 7) {
         return { kind: "preset", id: DEFAULT_AVATAR.shape as PresetShapeId };
       }
       const parsedWidths = rawWidths as number[];
@@ -292,15 +296,42 @@ export function parseShape(shape: string): ParsedShape {
           ? parsedWidths
           : resampleWidths(parsedWidths, expectedBands);
 
+      // Parse face — preset id or "draw:..." encoding
       const rawFace = parts["face"];
-      const face: FaceId = VALID_FACE_IDS.has(rawFace as FaceId)
-        ? (rawFace as FaceId)
-        : "none";
+      let face: FaceId | string;
+      if (rawFace.startsWith("draw:")) {
+        // Custom drawn face — keep as-is, validate it's well-formed below
+        face = rawFace;
+      } else {
+        face = VALID_FACE_IDS.has(rawFace as FaceId) ? (rawFace as FaceId) : "none";
+      }
 
-      // Parse edge dial — keyword or 0..1 number, missing → 0 (round)
-      const edge = parseEdge(parts["edge"]);
+      // Parse edge — single number (old form → apply to all bands) OR
+      // comma-joined array (new per-band form). Missing → all 0 (round).
+      let edges: number[];
+      const rawEdge = parts["edge"];
+      if (!rawEdge || rawEdge === "round") {
+        edges = Array(widths.length).fill(0);
+      } else if (rawEdge === "straight") {
+        edges = Array(widths.length).fill(1);
+      } else if (rawEdge.includes(",")) {
+        // New per-band array form
+        const parsed = rawEdge.split(",").map((v) => {
+          const n = parseFloat(v);
+          return isNaN(n) ? 0 : clamp01(n);
+        });
+        // Resample if needed to match band count
+        edges =
+          parsed.length === widths.length
+            ? parsed
+            : resampleWidths(parsed, widths.length);
+      } else {
+        // Old single-number form — apply to all bands
+        const single = parseEdge(rawEdge);
+        edges = Array(widths.length).fill(single);
+      }
 
-      return { kind: "thrown2", h, widths, face, edge };
+      return { kind: "thrown2", h, widths, face: face as FaceId, edges };
     } catch {
       return { kind: "preset", id: DEFAULT_AVATAR.shape as PresetShapeId };
     }
@@ -317,7 +348,7 @@ export function canonicalizeShape(shape: string): string {
     return parsed.id;
   }
   if (parsed.kind === "thrown2") {
-    return encodeThrown2Shape(parsed.h, parsed.widths, parsed.face, parsed.edge);
+    return encodeThrown2Shape(parsed.h, parsed.widths, parsed.face, parsed.edges);
   }
   return encodeThrownShape(parsed.params, parsed.face);
 }
@@ -325,26 +356,48 @@ export function canonicalizeShape(shape: string): string {
 // ── thrown2 encoding ──────────────────────────────────────────────────────
 
 /**
- * How many widen-able bands a given height produces.
- * Capped at 4 so vases stay smooth and easy to shape (more bands got spiky).
- * h=0 → 2 bands, h=0.5 → 3, h=1 → 4.
+ * How many width-adjustable bands a given height produces.
+ * h=0 → 2 bands (squat), h=1 → 7 bands (tall, maximum detail).
+ * Formula: 2 + round(h * 5), giving [2, 3, 4, 5, 6, 7] across the range.
  */
 export function bandsForHeight(h: number): number {
-  return 2 + Math.round(clamp01(h) * 2);
+  return 2 + Math.round(clamp01(h) * 5);
 }
 
-/** Encode a thrown2 vase to a storable string. edge is a 0..1 dial (0 = round). */
+/**
+ * Encode a thrown2 vase to a storable string.
+ * edges is a per-band array of 0..1 values (0 = round, 1 = straight).
+ * Accepts either a number[] (new form) or a single number (old compat — applied to all bands).
+ *
+ * New format:
+ *   thrown2:h=0.600;w=0.400,0.720,0.500;edge=0.00,0.00,0.00;face=happy
+ *
+ * face may be a preset id like "happy" or a draw string like "draw:x1,y1,...|..."
+ */
 export function encodeThrown2Shape(
   h: number,
   widths: number[],
-  face: FaceId,
-  edge: number = 0
+  face: FaceId | string,
+  edges: number[] | number = 0
 ): string {
   const hStr = clamp01(h).toFixed(3);
   const wStr = widths.map((w) => clamp01(w).toFixed(3)).join(",");
-  const faceId: FaceId = VALID_FACE_IDS.has(face) ? face : "none";
-  const edgeStr = clamp01(edge).toFixed(2);
-  return `thrown2:h=${hStr};w=${wStr};edge=${edgeStr};face=${faceId}`;
+  const faceStr = typeof face === "string" ? face : (VALID_FACE_IDS.has(face) ? face : "none");
+
+  // Normalize edges to array
+  let edgeArr: number[];
+  if (typeof edges === "number") {
+    edgeArr = Array(widths.length).fill(clamp01(edges));
+  } else {
+    edgeArr = edges.map(clamp01);
+    // Ensure same length as widths
+    if (edgeArr.length !== widths.length) {
+      edgeArr = resampleWidths(edgeArr, widths.length);
+    }
+  }
+  const edgeStr = edgeArr.map((e) => e.toFixed(2)).join(",");
+
+  return `thrown2:h=${hStr};w=${wStr};edge=${edgeStr};face=${faceStr}`;
 }
 
 /**
@@ -354,6 +407,7 @@ export function encodeThrown2Shape(
 export function resampleWidths(widths: number[], targetLen: number): number[] {
   if (widths.length === targetLen) return widths.slice();
   if (widths.length === 1) return Array(targetLen).fill(widths[0]);
+  if (targetLen === 1) return [widths[Math.floor(widths.length / 2)]];
   const result: number[] = [];
   for (let i = 0; i < targetLen; i++) {
     const t = i / (targetLen - 1);
@@ -367,8 +421,8 @@ export function resampleWidths(widths: number[], targetLen: number): number[] {
 }
 
 /** Default thrown2 widths for a pleasant S-curve at h=0.6 (4 bands with new formula) */
-// h=0.6 → 3 bands: narrow foot, round belly, gently flared lip
-export const DEFAULT_THROWN2_WIDTHS = [0.4, 0.72, 0.5];
+// h=0.6 → bandsForHeight(0.6) = 2 + round(0.6*5) = 2+3 = 5 bands
+export const DEFAULT_THROWN2_WIDTHS = [0.35, 0.55, 0.72, 0.58, 0.42];
 export const DEFAULT_THROWN2_H = 0.6;
 
 // ── buildThrownPath ───────────────────────────────────────────────────────
@@ -478,26 +532,47 @@ export function buildThrownPath(params: ThrownParams): string {
 // Generates a smooth symmetric SVG path from h + width stops.
 // 64×64 viewBox; center = x=32.
 // widths[0] = foot width (bottom), widths[N-1] = lip width (top).
-// Visual height: foot sits at y≈58, lip y lerps from ~34 (h=0, squat) to ~6 (h=1, tall).
-// Uses Catmull-Rom → cubic bézier for "round" edge; faceted quadratic eases for "straight".
+// Visual height: foot sits at y≈57, lip y lerps from ~36 (h=0, squat) to ~4 (h=1, tall).
+// Uses per-band vertical-tangent cubic bézier;
+//   edges[i] = 0 → round bulge, 1 → straight facet for band i.
 
 /** Compute the actual lip Y for a given h (used by VaseAvatar for face placement). */
 export function thrown2LipY(h: number): number {
-  return 35 - clamp01(h) * 29; // h=0 → 35 (squat), h=1 → 6 (nice & tall)
+  // h=0 → 36 (squat), h=1 → 4 (tall) — widen range for tall pots
+  return 36 - clamp01(h) * 32;
 }
 
 /** Compute the foot Y (constant — leaves ~7px bottom margin in the 64 viewBox). */
 export const THROWN2_FOOT_Y = 57;
 
-export function buildThrown2Path(h: number, widths: number[], edge: number = 0): string {
+/**
+ * Build the SVG path for a thrown2 vase.
+ * edges: per-band array (0..1 per band, length = widths.length).
+ *   0 = round/smooth bulge, 1 = straight/faceted.
+ * Falls back gracefully if edges is missing, shorter, or a plain number.
+ */
+export function buildThrown2Path(
+  h: number,
+  widths: number[],
+  edges: number[] | number = 0
+): string {
   const safeH = clamp01(h);
   const p = (n: number) => n.toFixed(2);
 
-  // Vertical extents — lip y scales visibly with h
-  const lipY    = thrown2LipY(safeH);   // h=0 → 34, h=1 → 6
-  const bottomY = THROWN2_FOOT_Y;       // foot always near bottom (y≈58)
+  // Normalize edges to per-band array
+  const N = widths.length;
+  let edgeArr: number[];
+  if (typeof edges === "number") {
+    edgeArr = Array(N).fill(clamp01(edges));
+  } else if (edges.length === N) {
+    edgeArr = edges.map(clamp01);
+  } else {
+    edgeArr = resampleWidths(edges.map(clamp01), N);
+  }
 
-  const N = widths.length; // number of bands (2..6)
+  // Vertical extents — lip y scales visibly with h
+  const lipY    = thrown2LipY(safeH);   // h=0 → 36, h=1 → 4
+  const bottomY = THROWN2_FOOT_Y;       // foot always near bottom (y≈57)
 
   // Compute Y positions for each band (evenly distributed foot→lip)
   // Band 0 = foot (bottomY), Band N-1 = lip (lipY)
@@ -508,9 +583,9 @@ export function buildThrown2Path(h: number, widths: number[], edge: number = 0):
   }
 
   // Compute right-side X positions (half-widths clamped)
-  // min half-width ~3.2, max ~26 (+1.5 lip flare = 60.5 → ≥3.5px side margin)
+  // MAX_HW=24.5 ensures a full-width (w=1) pot at x=32+24.5=56.5 stays within [3.5,60.5]
   const MIN_HW = 3.2;
-  const MAX_HW = 26.0;
+  const MAX_HW = 24.5;
   const rightX: number[] = widths.map((w) => {
     const hw = MIN_HW + clamp01(w) * (MAX_HW - MIN_HW);
     return 32 + hw;
@@ -535,21 +610,22 @@ export function buildThrown2Path(h: number, widths: number[], edge: number = 0):
   const footY = bandY[0];
   const rFoot = rightPts[0].x;
 
-  // ── Vertical-tangent spline, smoothness driven by the edge dial ──────────
-  // Each band point is treated as a single point the profile flows through
-  // with a VERTICAL tangent, so the silhouette bulges out and in as one
-  // continuous wavy curve (round) rather than flat faceted sections.
-  // k = handle length as a fraction of each segment's height.
-  //   edge=0 → k≈0.55 (lush round bulges)
-  //   edge=1 → k≈0.02 (handles collapse → straight facets)
-  const k = 0.55 - clamp01(edge) * 0.53;
+  // ── Per-band vertical-tangent spline ─────────────────────────────────────
+  // Each segment i→i+1 uses edgeArr[i] to scale the handle length.
+  // k(edge=0) ≈ 0.55 → round/smooth bulge
+  // k(edge=1) ≈ 0.02 → handles collapse → straight facets
+  function segmentK(edge: number): number {
+    return 0.55 - clamp01(edge) * 0.53;
+  }
 
-  /** Cubic segments through a point chain, vertical tangents at every point. */
-  function smoothSegments(pts: Pt[]): string[] {
+  /** Cubic segments through a point chain, per-segment k. */
+  function smoothSegments(pts: Pt[], bandEdges: number[]): string[] {
     const segs: string[] = [];
     for (let i = 0; i < pts.length - 1; i++) {
       const p1 = pts[i];
       const p2 = pts[i + 1];
+      // Use the edge of the band at index i for right side (foot→lip ordering)
+      const k = segmentK(bandEdges[i] ?? 0);
       const handle = Math.abs(p2.y - p1.y) * k;
       const dir = p2.y < p1.y ? -1 : 1; // travel direction in y
       const cp1 = { x: p1.x, y: p1.y + dir * handle };
@@ -561,24 +637,92 @@ export function buildThrown2Path(h: number, widths: number[], edge: number = 0):
     return segs;
   }
 
-  const rightSegments = smoothSegments(rightPts); // foot → lip
-  const leftSegments = smoothSegments(leftPts); // lip → foot
+  // Right side: foot→lip uses edgeArr[0..N-2]
+  const rightEdges = edgeArr.slice(0, N - 1);
+  // Left side: lip→foot (reversed), uses edgeArr[N-2..0]
+  const leftEdges = edgeArr.slice(0, N - 1).reverse();
 
-  // Lip/foot end-cap bulge also flattens as the pot straightens
-  const round = 1 - clamp01(edge);
+  const rightSegments = smoothSegments(rightPts, rightEdges); // foot → lip
+  const leftSegments  = smoothSegments(leftPts,  leftEdges);  // lip → foot
+
+  // Lip/foot end-cap bulge also flattens as the top band straightens
+  const topEdge = edgeArr[N - 1] ?? 0;
+  const botEdge = edgeArr[0] ?? 0;
+  const topRound = 1 - clamp01(topEdge);
+  const botRound = 1 - clamp01(botEdge);
+
   return [
     // Start at right foot
     `M ${p(rFoot)} ${p(footY)}`,
     // Right side: foot → lip
     ...rightSegments,
     // Lip top arc (flat when straight, gently domed when round)
-    `Q 32 ${p(lipY - 2 * round)}, ${p(lipLeftX)} ${p(lipY)}`,
+    `Q 32 ${p(lipY - 2 * topRound)}, ${p(lipLeftX)} ${p(lipY)}`,
     // Left side: lip → foot
     ...leftSegments,
     // Close along foot
-    `Q 32 ${p(footY + 1.5 * round)}, ${p(rFoot)} ${p(footY)}`,
+    `Q 32 ${p(footY + 1.5 * botRound)}, ${p(rFoot)} ${p(footY)}`,
     "Z",
   ].join(" ");
+}
+
+// ── resolveGlaze ──────────────────────────────────────────────────────────
+
+/**
+ * Resolve a glaze string to a hex color.
+ * - Preset id (e.g. "terracotta") → looks up fill from AVATAR_GLAZES
+ * - Raw hex (e.g. "#C47A3A") → returns as-is
+ * - Unknown → returns default terracotta
+ */
+export function resolveGlaze(glaze: string): string {
+  if (!glaze) return AVATAR_GLAZES[0].fill;
+  // Raw hex
+  if (/^#[0-9A-Fa-f]{6}$/.test(glaze)) return glaze;
+  if (/^#[0-9A-Fa-f]{3}$/.test(glaze)) {
+    // Expand shorthand hex
+    const r = glaze[1] + glaze[1];
+    const g = glaze[2] + glaze[2];
+    const b = glaze[3] + glaze[3];
+    return `#${r}${g}${b}`;
+  }
+  // Preset id lookup
+  const found = AVATAR_GLAZES.find((g) => g.id === glaze);
+  return found ? found.fill : AVATAR_GLAZES[0].fill;
+}
+
+// ── parseFaceDrawing ──────────────────────────────────────────────────────
+
+export interface DrawStroke {
+  /** Points as flat [x, y, x, y, ...] integers in face-zone space */
+  points: number[];
+}
+
+/**
+ * Parse a "draw:..." face string into an array of strokes.
+ * Format: draw:x1,y1,x2,y2,...|x1,y1,...
+ * Each pipe-delimited segment is one polyline; points are comma-joined integers.
+ */
+export function parseFaceDrawing(face: string): DrawStroke[] {
+  if (!face.startsWith("draw:")) return [];
+  const data = face.slice("draw:".length);
+  if (!data) return [];
+  return data.split("|").map((seg) => {
+    const pts = seg.split(",").map(Number).filter((v) => !isNaN(v));
+    return { points: pts };
+  }).filter((s) => s.points.length >= 4);
+}
+
+/**
+ * Encode an array of strokes to a "draw:..." face string.
+ * Points are rounded to integers; long strokes are capped at 64 points (32 xy pairs).
+ */
+export function encodeFaceDrawing(strokes: DrawStroke[]): string {
+  const parts = strokes.map((s) => {
+    // Cap at 64 values (32 points) per stroke
+    const pts = s.points.slice(0, 64).map(Math.round);
+    return pts.join(",");
+  });
+  return `draw:${parts.join("|")}`;
 }
 
 // ── Default ───────────────────────────────────────────────────────────────

@@ -1,13 +1,14 @@
 import { useId } from "react";
 import {
   getShape,
-  getGlaze,
   getPattern,
   parseShape,
   buildThrownPath,
   buildThrown2Path,
   thrown2LipY,
   THROWN2_FOOT_Y,
+  resolveGlaze,
+  parseFaceDrawing,
 } from "@/lib/avatars";
 import type { AvatarShape, AvatarGlaze, AvatarPattern, FaceId, ThrownParams } from "@/lib/avatars";
 
@@ -21,6 +22,7 @@ interface VaseAvatarProps {
 
 /** Darken a hex color by mixing with ink */
 function darkenFill(hex: string, amount = 0.3): string {
+  if (!hex.startsWith("#") || hex.length < 7) return hex;
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
@@ -33,6 +35,7 @@ function darkenFill(hex: string, amount = 0.3): string {
 
 /** Lighten a hex color by mixing with cream */
 function lightenFill(hex: string, amount = 0.4): string {
+  if (!hex.startsWith("#") || hex.length < 7) return hex;
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
@@ -53,18 +56,54 @@ function FaceOverlay({
   cy,
   scale,
 }: {
-  face: FaceId;
+  face: FaceId | string;
   cx: number;
   cy: number;
   scale: number;
 }) {
-  if (face === "none") return null;
+  if (!face || face === "none") return null;
 
+  // Custom drawn face
+  if (typeof face === "string" && face.startsWith("draw:")) {
+    const strokes = parseFaceDrawing(face);
+    if (strokes.length === 0) return null;
+    const ink = "#2C1810";
+    // Face zone is a roughly 20×16 unit area in the face-zone coordinate space
+    // Map from face-zone coords (0..100 range) to SVG around cx,cy
+    const zoneW = 14 * scale;
+    const zoneH = 12 * scale;
+    return (
+      <g>
+        {strokes.map((stroke, si) => {
+          if (stroke.points.length < 4) return null;
+          const pts: string[] = [];
+          for (let i = 0; i + 1 < stroke.points.length; i += 2) {
+            const fx = (stroke.points[i]     / 100) * zoneW - zoneW / 2 + cx;
+            const fy = (stroke.points[i + 1] / 100) * zoneH - zoneH / 2 + cy;
+            pts.push(`${fx.toFixed(2)},${fy.toFixed(2)}`);
+          }
+          return (
+            <polyline
+              key={si}
+              points={pts.join(" ")}
+              stroke={ink}
+              strokeWidth={1.2 * scale}
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          );
+        })}
+      </g>
+    );
+  }
+
+  const faceId = face as FaceId;
   const ink = "#2C1810";
   const blushColor = "rgba(212,132,122,0.55)";
   const s = scale; // shorthand
 
-  switch (face) {
+  switch (faceId) {
     case "happy":
       return (
         <g>
@@ -184,8 +223,8 @@ function getFacePosition(
   if (kind === "thrown2" && thrown2) {
     const { h, widths } = thrown2;
     // Use the actual lip/foot ys from the path builder helpers
-    const lipY = thrown2LipY(h);    // h=0 → 34, h=1 → 6
-    const footY = THROWN2_FOOT_Y;  // 58
+    const lipY = thrown2LipY(h);    // h=0 → 36, h=1 → 4
+    const footY = THROWN2_FOOT_Y;  // 57
     // Place face near the widest band in the upper portion
     const N = widths.length;
     const upperThirdEnd = Math.ceil(N * 0.67);
@@ -221,26 +260,34 @@ export default function VaseAvatar({
   const vasePath = isThrownShape
     ? buildThrownPath(parsed.params)
     : isThrown2Shape
-      ? buildThrown2Path(parsed.h, parsed.widths, parsed.edge)
+      ? buildThrown2Path(parsed.h, parsed.widths, parsed.edges)
       : getShape(parsed.id).path;
 
-  const glazeData  = getGlaze(glazeProp  ?? "terracotta");
+  // Resolve glaze to a hex color (supports preset ids AND raw hex)
+  const fill = resolveGlaze(glazeProp ?? "terracotta");
+
   const patternId  = (patternProp ?? "plain") as AvatarPattern;
+  getPattern(patternId); // validate (no-op but keeps import used)
 
   // Face only exists on thrown vases
-  const face: FaceId = (isThrownShape || isThrown2Shape) ? parsed.face : "none";
+  const face: FaceId | string = (isThrownShape || isThrown2Shape) ? parsed.face : "none";
 
   // useId guarantees document-unique, SSR/hydration-stable ids even when the
   // same shape/glaze/pattern combo renders multiple times on one page.
   // Strip the delimiter chars (e.g. «r1» / :r1:) — they break url(#...) refs.
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
-  const clipId = `clip-${uid}`;
-  const patId  = `pat-${uid}`;
+  const clipId   = `clip-${uid}`;
+  const patId    = `pat-${uid}`;
+  const glazeId  = `glaze-${uid}`;
 
-  const fill        = glazeData.fill;
   const patternFill = darkenFill(fill, 0.28);
   const patternFillLight = lightenFill(fill, 0.35);
   const ink         = "#2C1810";
+
+  // Compute radial gradient stops from the base fill
+  const sheenHighlight = lightenFill(fill, 0.68);
+  const sheenMid       = fill;
+  const sheenDark      = darkenFill(fill, 0.22);
 
   // Render pattern defs
   function renderPatternDef() {
@@ -321,14 +368,38 @@ export default function VaseAvatar({
           <path d={vasePath} />
         </clipPath>
         {renderPatternDef()}
+        {/* Radial gradient for realistic glaze sheen:
+            light highlight top-left → base hue → slightly darker rim */}
+        <radialGradient
+          id={glazeId}
+          cx="38%"
+          cy="28%"
+          r="70%"
+          fx="35%"
+          fy="22%"
+          gradientUnits="objectBoundingBox"
+        >
+          <stop offset="0%"   stopColor={sheenHighlight} stopOpacity="0.95" />
+          <stop offset="45%"  stopColor={sheenMid}       stopOpacity="1" />
+          <stop offset="100%" stopColor={sheenDark}       stopOpacity="1" />
+        </radialGradient>
       </defs>
 
-      {/* Vase fill */}
+      {/* Vase base fill (flat color as fallback) */}
       <path
         d={vasePath}
         fill={fill}
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+
+      {/* Radial gradient glaze sheen overlay */}
+      <path
+        d={vasePath}
+        fill={`url(#${glazeId})`}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity="0.9"
       />
 
       {/* Pattern overlay (clipped to vase) */}
@@ -363,17 +434,17 @@ export default function VaseAvatar({
         strokeLinejoin="round"
       />
 
-      {/* Subtle glaze highlight */}
+      {/* Subtle glaze highlight streak */}
       <path
         d={vasePath}
         fill="none"
-        stroke={lightenFill(fill, 0.6)}
+        stroke={sheenHighlight}
         strokeWidth={size < 40 ? 1 : 1.2}
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeDasharray="4 28"
         strokeDashoffset="6"
-        opacity="0.7"
+        opacity="0.65"
         clipPath={`url(#${clipId})`}
       />
     </svg>
