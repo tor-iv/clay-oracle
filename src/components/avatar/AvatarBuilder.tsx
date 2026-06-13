@@ -29,6 +29,7 @@ import type {
   AvatarPatternStyle,
   FaceId,
 } from "@/lib/avatars";
+import DoodleIcon from "@/components/ui/DoodleIcon";
 
 interface AvatarBuilderProps {
   defaultShape?:   AvatarShape;
@@ -1055,7 +1056,7 @@ function PatternPicker({
             className="text-xs leading-none"
             style={{ fontFamily: "var(--font-hand)", color: decorateMode ? "#D4A840" : "var(--color-clay-ink-muted)" }}
           >
-            ✏️ draw
+            <DoodleIcon name="pen" size={13} color={decorateMode ? "#D4A840" : "var(--color-clay-ink-muted)"} /> draw
           </span>
         </button>
       </div>
@@ -1093,10 +1094,10 @@ function PatternPicker({
             }}
           >
             <span style={{
-              fontFamily: "var(--font-hand)", fontSize: "0.6rem",
-              color: "rgba(44,24,16,0.7)", background: "rgba(245,240,232,0.7)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              background: "rgba(245,240,232,0.7)",
               borderRadius: 3, padding: "1px 2px", pointerEvents: "none",
-            }}>🎨</span>
+            }}><DoodleIcon name="palette" size={14} color="rgba(44,24,16,0.7)" /></span>
             <input
               type="color"
               value={activeColor || glazeHex}
@@ -1314,7 +1315,10 @@ export default function AvatarBuilder({
                 gap: 4,
               }}
             >
-              ✨ surprise me
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3em" }}>
+                <DoodleIcon name="sparkle" size={15} color="#2C1810" />
+                surprise me
+              </span>
             </button>
             <button
               type="button"

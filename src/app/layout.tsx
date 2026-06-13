@@ -18,7 +18,7 @@ const patrickHand = Patrick_Hand({
 });
 
 export const metadata: Metadata = {
-  title: "Clay Oracle 🔮",
+  title: "Clay Oracle",
   description: "Throw a pot and discover what it says about you.",
 };
 

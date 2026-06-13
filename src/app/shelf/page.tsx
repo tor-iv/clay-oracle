@@ -7,10 +7,11 @@ import VaseAvatar from "@/components/avatar/VaseAvatar";
 import WobblyCard from "@/components/ui/WobblyCard";
 import InkButton from "@/components/ui/InkButton";
 import DoodleIcon from "@/components/ui/DoodleIcon";
+import ArchetypeIcon from "@/components/avatar/ArchetypeIcon";
 import type { Pot } from "@/db/schema";
 
 export const metadata: Metadata = {
-  title: "The Shelf 🏺 · Clay Oracle",
+  title: "The Shelf · Clay Oracle",
   description: "Pots thrown by visitors of Clay Oracle.",
 };
 
@@ -40,7 +41,7 @@ export default async function ShelfPage() {
                 lineHeight: 1.1,
               }}
             >
-              the shelf 🏺
+              the shelf
             </h1>
           </div>
           <p
@@ -139,9 +140,14 @@ function PotCard({ pot }: { pot: Pot }) {
               fontWeight: 700,
               color: archetype.accentHex,
               lineHeight: 1.2,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.3em",
             }}
           >
-            {archetype.emoji} {archetype.name}
+            <ArchetypeIcon id={archetype.id} size={18} color={archetype.accentHex} />
+            {archetype.name}
           </div>
 
           {/* Signature */}
@@ -202,7 +208,10 @@ function EmptyState() {
             marginBottom: "0.5rem",
           }}
         >
-          the shelf is bare 🌱
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3em" }}>
+            the shelf is bare
+            <DoodleIcon name="sprout" size={22} color="var(--color-clay-ink)" />
+          </span>
         </p>
         <p
           style={{

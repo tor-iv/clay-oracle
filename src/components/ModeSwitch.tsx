@@ -3,6 +3,7 @@
 import { useState } from "react";
 import AvatarBuilder from "@/components/avatar/AvatarBuilder";
 import HardModeWheel from "@/components/avatar/HardModeWheel";
+import DoodleIcon from "@/components/ui/DoodleIcon";
 
 export default function ModeSwitch() {
   const [mode, setMode] = useState<"easy" | "hard">("easy");
@@ -61,7 +62,10 @@ export default function ModeSwitch() {
             fontWeight: mode === "hard" ? 600 : 400,
           }}
         >
-          hard mode 🔥
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3em" }}>
+            hard mode
+            <DoodleIcon name="flame" size={16} color={mode === "hard" ? "#E8D5B0" : "var(--color-clay-ink-muted)"} />
+          </span>
         </button>
       </div>
 

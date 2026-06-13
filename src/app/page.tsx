@@ -18,7 +18,10 @@ export default function Home() {
               color: "#B85C2A",
             }}
           >
-            Clay Oracle 🔮
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3em" }}>
+              <DoodleIcon name="crystal" size={36} color="#B85C2A" aria-hidden={true} />
+              Clay Oracle
+            </span>
           </h1>
           <p
             className="mt-1"

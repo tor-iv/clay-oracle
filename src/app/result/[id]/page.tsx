@@ -9,6 +9,7 @@ import WobblyCard from "@/components/ui/WobblyCard";
 import HandInput from "@/components/ui/HandInput";
 import InkButton from "@/components/ui/InkButton";
 import DoodleIcon from "@/components/ui/DoodleIcon";
+import ArchetypeIcon from "@/components/avatar/ArchetypeIcon";
 import ShareButton from "@/components/ShareButton";
 import { nameOnShelfAction, setPlaylistAction } from "@/actions/pot";
 
@@ -27,23 +28,23 @@ export async function generateMetadata({
     .limit(1);
   const pot = rows[0];
   if (!pot) {
-    return { title: "Clay Oracle 🔮" };
+    return { title: "Clay Oracle" };
   }
 
   const archetype = ARCHETYPES.find((a) => a.id === pot.archetype_id) ?? ARCHETYPES[0];
   const descSnippet = pot.reading.slice(0, 120) + (pot.reading.length > 120 ? "…" : "");
 
   return {
-    title: `I'm ${archetype.name} ${archetype.emoji} 🏺`,
+    title: `I'm ${archetype.name}`,
     description: descSnippet,
     openGraph: {
-      title: `I'm ${archetype.name} ${archetype.emoji} 🏺`,
+      title: `I'm ${archetype.name}`,
       description: descSnippet,
       images: [`/api/og/${id}`],
     },
     twitter: {
       card: "summary_large_image",
-      title: `I'm ${archetype.name} ${archetype.emoji} 🏺`,
+      title: `I'm ${archetype.name}`,
       description: descSnippet,
       images: [`/api/og/${id}`],
     },
@@ -143,7 +144,10 @@ export default async function ResultPage({
               letterSpacing: "-0.01em",
             }}
           >
-            {archetype.emoji} {archetype.name}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25em" }}>
+              <ArchetypeIcon id={archetype.id} size={40} color={archetype.accentHex} />
+              {archetype.name}
+            </span>
           </div>
           <div
             style={{
@@ -198,7 +202,7 @@ export default async function ResultPage({
         <form action={playlistAction} className="mb-6 flex flex-col gap-2 sm:flex-row">
           <HandInput
             name="playlist"
-            placeholder="🎵 paste a Spotify link to set your own soundtrack"
+            placeholder="paste a Spotify link to set your own soundtrack"
             defaultValue=""
             className="flex-1"
             style={{ fontSize: "0.95rem" }}
@@ -229,7 +233,7 @@ export default async function ResultPage({
                 >
                   {pot.name}
                 </span>{" "}
-                🖊️
+                <DoodleIcon name="pen" size={16} color="var(--color-clay-ink-muted)" />
               </div>
               <Link
                 href="/shelf"
@@ -258,7 +262,10 @@ export default async function ResultPage({
                   fontWeight: 700,
                 }}
               >
-                add your name to the shelf 🏺
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3em" }}>
+                  add your name to the shelf
+                  <DoodleIcon name="amphora" size={18} color="var(--color-clay-ink)" />
+                </span>
               </div>
               <p
                 style={{
@@ -296,7 +303,7 @@ export default async function ResultPage({
         {/* ── Share row ─────────────────────────────────────────────── */}
         <div className="flex gap-3 flex-wrap items-center justify-center mb-8">
           <ShareButton
-            title={`I'm ${archetype.name} ${archetype.emoji} 🏺 — Clay Oracle`}
+            title={`I'm ${archetype.name} — Clay Oracle`}
             text={pot.reading.slice(0, 140)}
           />
           <Link href="/shelf">

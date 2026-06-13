@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import VaseAvatar from "./VaseAvatar";
+import DoodleIcon from "@/components/ui/DoodleIcon";
 import {
   AVATAR_GLAZES,
   AVATAR_PATTERNS,
@@ -1113,7 +1114,10 @@ function GlazeStage({ h, widths, edges, onComplete }: GlazeStageProps) {
           (e.currentTarget as HTMLElement).style.transform = "translateY(0)";
         }}
       >
-        🔥 fire it
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35em" }}>
+          <DoodleIcon name="flame" size={18} color="#F5F0E8" />
+          fire it
+        </span>
       </button>
     </div>
   );
