@@ -13,16 +13,17 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Fetch Caveat font once per cold-start; fall back to no custom font on error.
+// Fetch Caveat once per cold-start. MUST be TTF/OTF/WOFF — Satori cannot parse
+// woff2. Fontsource on jsDelivr serves a static TTF reliably.
 let _caveatFont: ArrayBuffer | null | undefined = undefined; // undefined = not tried
 
 async function loadCaveat(): Promise<ArrayBuffer | null> {
   if (_caveatFont !== undefined) return _caveatFont;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
+    const timeout = setTimeout(() => controller.abort(), 5000);
     const res = await fetch(
-      "https://fonts.gstatic.com/s/caveat/v18/WnznHAc5bAfYB2QRah7pcpNvOx-pjcB9eIWpZQ.woff2",
+      "https://cdn.jsdelivr.net/fontsource/fonts/caveat@latest/latin-700-normal.ttf",
       { signal: controller.signal }
     );
     clearTimeout(timeout);
@@ -32,6 +33,36 @@ async function loadCaveat(): Promise<ArrayBuffer | null> {
     _caveatFont = null;
   }
   return _caveatFont;
+}
+
+/** A text-free card that needs no font — the always-works fallback. */
+function fallbackCard() {
+  return new ImageResponse(
+    (
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "#F5F0E8",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            width: 220,
+            height: 220,
+            borderRadius: 32,
+            backgroundColor: "#B85C2A",
+            border: "8px solid #2C1810",
+          }}
+        />
+      </div>
+    ),
+    { width: 1200, height: 630 }
+  );
 }
 
 /** Build a simple SVG string of the vase silhouette for the OG card. */
@@ -69,38 +100,22 @@ export async function GET(
       .limit(1);
     const pot = rows[0];
 
-    if (!pot) {
-      // Minimal fallback for unknown ids
-      return new ImageResponse(
-        (
-          <div
-            style={{
-              width: "100%",
-              height: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: "#F5F0E8",
-              fontFamily: "sans-serif",
-              fontSize: 48,
-              color: "#2C1810",
-            }}
-          >
-            Clay Oracle 🔮
-          </div>
-        ),
-        { width: 1200, height: 630 }
-      );
-    }
+    if (!pot) return fallbackCard();
+
+    const caveat = await loadCaveat();
+    // Satori needs the named font loaded; if it didn't load, use the text-free card.
+    if (!caveat) return fallbackCard();
 
     const archetype = ARCHETYPES.find((a) => a.id === pot.archetype_id) ?? ARCHETYPES[0];
-    const caveat = await loadCaveat();
-    const fontOptions = caveat
-      ? [{ name: "Caveat", data: caveat, weight: 700 as const, style: "normal" as const }]
-      : [];
-    const titleFont = caveat ? "Caveat" : "sans-serif";
+    const fontOptions = [
+      { name: "Caveat", data: caveat, weight: 700 as const, style: "normal" as const },
+    ];
+    const titleFont = "Caveat";
 
     const vaseSvgUri = buildVaseSvg(pot.shape, pot.glaze);
+    const archetypeLabel = `${archetype.emoji} ${archetype.name}`;
+    const readingSnippet =
+      pot.reading.slice(0, 120) + (pot.reading.length > 120 ? "…" : "");
 
     return new ImageResponse(
       (
@@ -186,7 +201,7 @@ export async function GET(
                   letterSpacing: "-0.5px",
                 }}
               >
-                {archetype.emoji} {archetype.name}
+                {archetypeLabel}
               </div>
 
               {/* Reading snippet */}
@@ -194,12 +209,12 @@ export async function GET(
                 style={{
                   fontSize: 26,
                   color: "#2C1810",
-                  fontFamily: "sans-serif",
+                  fontFamily: titleFont,
                   lineHeight: 1.55,
                   maxWidth: 560,
                 }}
               >
-                {pot.reading.slice(0, 120)}{pot.reading.length > 120 ? "…" : ""}
+                {readingSnippet}
               </div>
             </div>
           </div>
@@ -213,10 +228,10 @@ export async function GET(
               fontSize: 20,
               color: "#5C3D2E",
               opacity: 0.55,
-              fontFamily: "sans-serif",
+              fontFamily: titleFont,
             }}
           >
-            clayoracle.app 🏺
+            oracle.claydate.nyc 🏺
           </div>
 
           {/* Ink border */}
@@ -237,27 +252,8 @@ export async function GET(
       }
     );
   } catch (err) {
-    // Never 500 the unfurl — minimal fallback always works.
+    // Never 500 the unfurl — the text-free card needs no font and always works.
     console.error("[OG] error:", err);
-    return new ImageResponse(
-      (
-        <div
-          style={{
-            width: "100%",
-            height: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "#F5F0E8",
-            fontFamily: "sans-serif",
-            fontSize: 52,
-            color: "#B85C2A",
-          }}
-        >
-          🏺 Clay Oracle
-        </div>
-      ),
-      { width: 1200, height: 630 }
-    );
+    return fallbackCard();
   }
 }

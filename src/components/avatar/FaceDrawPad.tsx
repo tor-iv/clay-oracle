@@ -99,10 +99,11 @@ export default function FaceDrawPad({ onChange, initialStrokes = [] }: FaceDrawP
     }
   }, []);
 
-  // Initial draw
+  // Repaint whenever strokes change OR the parent re-renders (the browser
+  // clears the canvas pixel buffer on repaint, so we must redraw from state).
   useEffect(() => {
     redrawCanvas(strokes);
-  }, [redrawCanvas]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [redrawCanvas, strokes]);
 
   function getCanvasPos(e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } {
     const canvas = canvasRef.current;

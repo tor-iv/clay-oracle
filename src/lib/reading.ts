@@ -1,13 +1,7 @@
 // ── Reading generator — server-only ───────────────────────────────────────
-// This file uses the OpenAI-compatible DeepSeek API and must only ever run
-// on the server.  Import `server-only` if the package is installed; Next.js
-// will tree-shake client bundles away from this module at build time.
-//
-// Per the Next.js 16 docs, installing `server-only` is **optional** — the
-// package is not bundled with Next.js itself.  Uncomment the line below if
-// you add it to package.json.
-//
-// import "server-only";
+// Build-time guard: importing this (which reads DEEPSEEK_API_KEY) from a
+// Client Component fails the build instead of leaking the key at runtime.
+import "server-only";
 
 import OpenAI from "openai";
 import type { Archetype } from "./personality";
