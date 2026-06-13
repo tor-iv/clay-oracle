@@ -528,7 +528,8 @@ export function resampleWidths(widths: number[], targetLen: number): number[] {
 
 /** Default thrown2 widths for a pleasant S-curve at h=0.6 (4 bands with new formula) */
 // h=0.6 → bandsForHeight(0.6) = 2 + round(0.6*5) = 2+3 = 5 bands
-export const DEFAULT_THROWN2_WIDTHS = [0.35, 0.55, 0.72, 0.58, 0.42];
+// 4 bands to match bandsForHeight(0.6); gentle S-curve foot→belly→neck→lip
+export const DEFAULT_THROWN2_WIDTHS = [0.4, 0.72, 0.55, 0.45];
 export const DEFAULT_THROWN2_H = 0.6;
 
 // ── buildThrownPath ───────────────────────────────────────────────────────
