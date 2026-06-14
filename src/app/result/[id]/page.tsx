@@ -208,6 +208,8 @@ export default async function ResultPage({
         {hasTracks ? (
           /* ── Real per-pot tracklist ─────────────────────────────── */
           <WobblyCard tone="warm" className="mb-3">
+            {/* Hover highlight via CSS (this is a Server Component — no JS handlers) */}
+            <style>{`.pot-track-row:hover{background:rgba(0,0,0,0.05)}`}</style>
             {/* Optional single-track embed at the top for instant play */}
             {firstTracked && (
               <div className="mb-4 overflow-hidden rounded-xl" style={{ border: "1.5px solid var(--color-clay-ink)" }}>
@@ -329,6 +331,7 @@ export default async function ResultPage({
                   <li key={i}>
                     {track.url ? (
                       <a
+                        className="pot-track-row"
                         href={track.url}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -338,14 +341,6 @@ export default async function ResultPage({
                           padding: "0.3rem 0.4rem",
                           transition: "background 0.15s",
                           textDecoration: "none",
-                        }}
-                        onMouseEnter={(e) => {
-                          (e.currentTarget as HTMLElement).style.background =
-                            "rgba(0,0,0,0.05)";
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLElement).style.background =
-                            "transparent";
                         }}
                       >
                         {inner}
