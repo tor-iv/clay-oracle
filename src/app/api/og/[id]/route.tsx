@@ -387,6 +387,7 @@ export async function GET(
               {/* Reading snippet */}
               <div
                 style={{
+                  display: "flex",
                   fontSize: 26,
                   color: "#2C1810",
                   fontFamily: titleFont,
@@ -405,17 +406,18 @@ export async function GET(
               position: "absolute",
               bottom: 32,
               right: 64,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
               fontSize: 20,
               color: "#5C3D2E",
               opacity: 0.55,
               fontFamily: titleFont,
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={ogArchetypeGlyphUri("amphora", "#5C3D2E")} alt="" width={20} height={20} style={{ flexShrink: 0 }} />
-              oracle.claydate.nyc
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={ogArchetypeGlyphUri("amphora", "#5C3D2E")} alt="" width={20} height={20} style={{ flexShrink: 0 }} />
+            oracle.claydate.nyc
           </div>
 
           {/* Ink border */}

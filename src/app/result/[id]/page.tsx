@@ -138,11 +138,25 @@ export default async function ResultPage({
               aria-hidden="true"
               style={{
                 position: "absolute",
-                width: 220,
-                height: 220,
+                width: 280,
+                height: 280,
                 borderRadius: "50%",
-                background: `radial-gradient(circle, ${archetype.accentHex}33 0%, transparent 70%)`,
-                filter: "blur(12px)",
+                background: `radial-gradient(circle, ${archetype.accentHex}45 0%, ${archetype.accentHex}1a 45%, transparent 72%)`,
+                filter: "blur(16px)",
+                pointerEvents: "none",
+              }}
+            />
+            {/* Soft contact shadow grounding the pot */}
+            <div
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                bottom: 6,
+                width: 130,
+                height: 22,
+                borderRadius: "50%",
+                background: "radial-gradient(ellipse, rgba(44,24,16,0.18) 0%, transparent 70%)",
+                filter: "blur(6px)",
                 pointerEvents: "none",
               }}
             />
@@ -196,9 +210,10 @@ export default async function ResultPage({
           <p
             style={{
               fontFamily: "var(--font-body)",
-              fontSize: "1.05rem",
-              lineHeight: 1.7,
+              fontSize: "1.2rem",
+              lineHeight: 1.8,
               color: "var(--color-clay-ink)",
+              letterSpacing: "0.005em",
             }}
           >
             {pot.reading}
