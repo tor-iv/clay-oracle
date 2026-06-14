@@ -12,6 +12,7 @@ import InkButton from "@/components/ui/InkButton";
 import DoodleIcon from "@/components/ui/DoodleIcon";
 import ArchetypeIcon from "@/components/avatar/ArchetypeIcon";
 import ShareButton from "@/components/ShareButton";
+import SaveImageButton from "@/components/SaveImageButton";
 import { nameOnShelfAction, setPlaylistAction } from "@/actions/pot";
 
 // ── Metadata ───────────────────────────────────────────────────────────────
@@ -475,6 +476,7 @@ export default async function ResultPage({
 
         {/* ── Share row ─────────────────────────────────────────────── */}
         <div className="flex gap-3 flex-wrap items-center justify-center mb-8">
+          <SaveImageButton id={pot.id} archetypeName={archetype.name} />
           <ShareButton
             title={`I'm ${archetype.name} — Clay Oracle`}
             text={pot.reading.slice(0, 140)}

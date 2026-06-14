@@ -36,7 +36,7 @@ async function loadCaveat(): Promise<ArrayBuffer | null> {
 }
 
 /** A text-free card that needs no font — the always-works fallback. */
-function fallbackCard() {
+function fallbackCard(width = 1200, height = 630) {
   return new ImageResponse(
     (
       <div
@@ -61,7 +61,7 @@ function fallbackCard() {
         />
       </div>
     ),
-    { width: 1200, height: 630 }
+    { width, height }
   );
 }
 
@@ -117,9 +117,14 @@ function buildVaseSvg(shape: string, glaze: string): string {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const format = new URL(req.url).searchParams.get("format");
+  const isSquare = format === "square";
+  const W = isSquare ? 1080 : 1200;
+  const H = isSquare ? 1080 : 630;
+
   try {
     const { id } = await params;
 
@@ -130,11 +135,11 @@ export async function GET(
       .limit(1);
     const pot = rows[0];
 
-    if (!pot) return fallbackCard();
+    if (!pot) return fallbackCard(W, H);
 
     const caveat = await loadCaveat();
     // Satori needs the named font loaded; if it didn't load, use the text-free card.
-    if (!caveat) return fallbackCard();
+    if (!caveat) return fallbackCard(W, H);
 
     const archetype = ARCHETYPES.find((a) => a.id === pot.archetype_id) ?? ARCHETYPES[0];
     const fontOptions = [
@@ -147,6 +152,145 @@ export async function GET(
     const readingSnippet =
       pot.reading.slice(0, 120) + (pot.reading.length > 120 ? "…" : "");
 
+    // ── Square 1080×1080 Instagram share card ────────────────────────────────
+    if (isSquare) {
+      const squareReading =
+        pot.reading.slice(0, 240) + (pot.reading.length > 240 ? "…" : "");
+      return new ImageResponse(
+        (
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: "#F5F0E8",
+              backgroundImage:
+                "radial-gradient(circle at 20% 80%, rgba(184,92,42,0.08) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(122,140,110,0.08) 0%, transparent 50%)",
+              fontFamily: titleFont,
+              padding: "72px 60px",
+              gap: 32,
+            }}
+          >
+            {/* Wordmark */}
+            <div
+              style={{
+                display: "flex",
+                fontSize: 30,
+                color: "#5C3D2E",
+                fontFamily: titleFont,
+                letterSpacing: 4,
+                textTransform: "uppercase",
+              }}
+            >
+              CLAY ORACLE
+            </div>
+
+            {/* Pot */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 460,
+                height: 460,
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={vaseSvgUri}
+                alt=""
+                width={460}
+                height={460}
+                style={{ objectFit: "contain" }}
+              />
+            </div>
+
+            {/* Archetype row */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 16,
+                  fontSize: 84,
+                  fontWeight: 700,
+                  color: archetype.accentHex,
+                  fontFamily: titleFont,
+                  lineHeight: 1.05,
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={archetypeGlyphUri} alt="" width={84} height={84} style={{ flexShrink: 0 }} />
+                {archetype.name}
+              </div>
+            </div>
+
+            {/* Reading */}
+            <div
+              style={{
+                display: "flex",
+                fontSize: 38,
+                color: "#2C1810",
+                fontFamily: titleFont,
+                lineHeight: 1.5,
+                textAlign: "center",
+                maxWidth: 880,
+              }}
+            >
+              {squareReading}
+            </div>
+
+            {/* Footer */}
+            <div
+              style={{
+                position: "absolute",
+                bottom: 40,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 24,
+                color: "#5C3D2E",
+                opacity: 0.55,
+                fontFamily: titleFont,
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={ogArchetypeGlyphUri("amphora", "#5C3D2E")} alt="" width={24} height={24} style={{ flexShrink: 0 }} />
+              oracle.claydate.nyc
+            </div>
+
+            {/* Ink border */}
+            <div
+              style={{
+                position: "absolute",
+                inset: 24,
+                border: "3px solid rgba(44,24,16,0.12)",
+                borderRadius: 28,
+              }}
+            />
+          </div>
+        ),
+        {
+          width: 1080,
+          height: 1080,
+          fonts: fontOptions,
+        }
+      );
+    }
+
+    // ── Default 1200×630 horizontal card (link-unfurl) ───────────────────────
     return new ImageResponse(
       (
         <div
@@ -294,6 +438,6 @@ export async function GET(
   } catch (err) {
     // Never 500 the unfurl — the text-free card needs no font and always works.
     console.error("[OG] error:", err);
-    return fallbackCard();
+    return fallbackCard(W, H);
   }
 }
