@@ -48,7 +48,7 @@ async function generateTracklist(
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8_000);
+    const timeout = setTimeout(() => controller.abort(), 12_000);
 
     let raw: string | null = null;
     try {

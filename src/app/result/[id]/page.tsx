@@ -3,8 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { ARCHETYPES } from "@/lib/personality";
-import type { PlaylistTrack } from "@/lib/playlist";
+import { ARCHETYPES, readVase } from "@/lib/personality";
+import { buildPotPlaylist, type PlaylistTrack } from "@/lib/playlist";
 import VaseAvatar from "@/components/avatar/VaseAvatar";
 import WobblyCard from "@/components/ui/WobblyCard";
 import HandInput from "@/components/ui/HandInput";
@@ -91,8 +91,29 @@ export default async function ResultPage({
   // Determine display mode:
   //   override   → user pasted their own Spotify link → show that embed
   //   tracklist  → real per-pot tracks resolved → show track list
-  //   default    → archetype editorial playlist embed
-  const hasOverride  = Boolean(pot.playlist_url);
+  // There is intentionally NO generic editorial-playlist fallback — every pot
+  // gets its own custom tracklist.
+  const hasOverride = Boolean(pot.playlist_url);
+
+  // Lazy backfill: older pots (or any whose generation failed at create time)
+  // have no stored tracklist. Generate one on first view and persist it, so the
+  // music is always custom to this pot rather than a generic mood playlist.
+  if (!hasOverride && tracks.length === 0) {
+    const { traits } = readVase(pot.shape, pot.glaze, pot.pattern);
+    const fresh = await buildPotPlaylist(traits, archetype);
+    if (fresh.length > 0) {
+      tracks = fresh;
+      try {
+        await db
+          .update(schema.pots)
+          .set({ tracklist: JSON.stringify(fresh) })
+          .where(eq(schema.pots.id, id));
+      } catch {
+        // Persist is best-effort — we still render the freshly generated tracks.
+      }
+    }
+  }
+
   const hasTracks    = !hasOverride && tracks.length > 0;
   const firstTracked = tracks.find((t) => t.spotifyId !== null) ?? null;
 
@@ -221,7 +242,21 @@ export default async function ResultPage({
         </WobblyCard>
 
         {/* ── Spotify section ────────────────────────────────────────── */}
-        {hasTracks ? (
+        {hasOverride ? (
+          /* ── User's pasted soundtrack override ───────────────────── */
+          <div className="mb-3 overflow-hidden rounded-xl" style={{ border: "2px solid var(--color-clay-ink)" }}>
+            <iframe
+              src={`https://open.spotify.com/embed/${pot.playlist_url}?utm_source=oembed`}
+              width="100%"
+              height="152"
+              frameBorder={0}
+              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+              loading="lazy"
+              style={{ display: "block", borderRadius: 10 }}
+              title="your soundtrack"
+            />
+          </div>
+        ) : hasTracks ? (
           /* ── Real per-pot tracklist ─────────────────────────────── */
           <WobblyCard tone="warm" className="mb-3">
             {/* Hover highlight via CSS (this is a Server Component — no JS handlers) */}
@@ -370,21 +405,22 @@ export default async function ResultPage({
             </ol>
           </WobblyCard>
         ) : (
-          /* ── Archetype editorial playlist / user override embed ─── */
-          <div className="mb-3 overflow-hidden rounded-xl" style={{ border: "2px solid var(--color-clay-ink)" }}>
-            <iframe
-              src={`https://open.spotify.com/embed/${
-                pot.playlist_url ?? `playlist/${archetype.playlistId}`
-              }?utm_source=oembed`}
-              width="100%"
-              height="152"
-              frameBorder={0}
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-              loading="lazy"
-              style={{ display: "block", borderRadius: 10 }}
-              title={pot.playlist_url ? "your soundtrack" : `${archetype.name} playlist`}
-            />
-          </div>
+          /* ── No custom tracks yet (keys unset or generation failed) ─── */
+          <WobblyCard tone="warm" className="mb-3">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                fontFamily: "var(--font-body)",
+                fontSize: "0.95rem",
+                color: "var(--color-clay-ink-muted)",
+              }}
+            >
+              <DoodleIcon name="moon" size={18} color={archetype.accentHex} />
+              the oracle is still tuning this pot&apos;s playlist — paste a song below to set your own.
+            </div>
+          </WobblyCard>
         )}
 
         {/* Set your own soundtrack */}
