@@ -327,8 +327,9 @@ function getFacePosition(
     const FACE_V_UP = 6;
     const FACE_V_DOWN = 6;
 
-    // Natural scale from the face band's width (keeps the old feel on wide pots).
-    const naturalScale = Math.min(0.5 + (widths[maxIdx] ?? 0.5) * 0.4, 1.0);
+    // Natural scale from the face band's width. Kept deliberately small so the
+    // face reads as a cute little face on the pot, never dominating it.
+    const naturalScale = Math.min(0.4 + (widths[maxIdx] ?? 0.5) * 0.28, 0.66);
 
     // The limiting wall is the NARROWEST point the face spans vertically —
     // critical for hourglass/waisted pots where the face sits at a pinch.
@@ -342,9 +343,10 @@ function getFacePosition(
       minHW = Math.min(minHW, halfWidthAt(y));
     }
 
-    // Fit the face within 78% of the narrowest wall half-width it overlaps.
-    const fitScale = (minHW * 0.78) / FACE_HALF_EXTENT;
-    const scale = Math.max(0.4, Math.min(naturalScale, fitScale));
+    // Fit the face within 58% of the narrowest wall half-width it overlaps —
+    // tight enough to leave a clear clay margin all around the face.
+    const fitScale = (minHW * 0.58) / FACE_HALF_EXTENT;
+    const scale = Math.max(0.3, Math.min(naturalScale, fitScale));
 
     return { cx: 32, cy: faceY, scale };
   }

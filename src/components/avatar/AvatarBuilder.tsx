@@ -217,8 +217,10 @@ interface WheelVasePreviewProps {
   pattern: string;
   face: FaceId | string;
   edges: number[];
-  onHeightChange: (h: number) => void;
-  onWidthsChange: (widths: number[]) => void;
+  /** Live sculpt during a drag: set height + widths together, no band-count resample. */
+  onSculpt: (h: number, widths: number[]) => void;
+  /** Drag released: settle the band count to the height's natural value. */
+  onSculptEnd: () => void;
   onEdgesChange: (edges: number[]) => void;
 }
 
@@ -229,8 +231,8 @@ function WheelVasePreview({
   pattern,
   face,
   edges,
-  onHeightChange,
-  onWidthsChange,
+  onSculpt,
+  onSculptEnd,
   onEdgesChange,
 }: WheelVasePreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -279,7 +281,7 @@ function WheelVasePreview({
     e.preventDefault();
     const el = containerRef.current;
     if (!el) return;
-    el.setPointerCapture(e.pointerId);
+    try { el.setPointerCapture(e.pointerId); } catch { /* capture is best-effort */ }
 
     const { relY } = getRelativePos(e);
     const n = widths.length;
@@ -312,55 +314,49 @@ function WheelVasePreview({
     if (!dragRef.current.hasDragged) return;
 
     e.preventDefault();
-    const dy = totalDy;
-    const dx = totalDx;
 
-    const vSens = 1 / PREVIEW_SIZE;
-    const hSens = 1 / PREVIEW_SIZE;
+    const startWidths = dragRef.current.startWidths;
+    const startBands = startWidths.length;
+    const active = dragRef.current.activeBandIndex;
 
-    const hDelta = -dy * vSens * 1.4;
+    // Axis-proportional gains: a mostly-vertical drag is mostly height, a
+    // mostly-horizontal drag is mostly width — so the two never fight each
+    // other and the motion feels intentional rather than twitchy.
+    const adx = Math.abs(totalDx);
+    const ady = Math.abs(totalDy);
+    const mag = adx + ady + 0.0001;
+    const wGain = 0.3 + 0.7 * (adx / mag); // 0.3 .. 1.0
+    const hGain = 0.3 + 0.7 * (ady / mag);
+
+    // Height — global, eased by the vertical share of the gesture.
+    const hDelta = (-totalDy / PREVIEW_SIZE) * 1.5 * hGain;
     const newH = Math.max(0, Math.min(1, dragRef.current.startH + hDelta));
 
-    const wDelta = dx * hSens * 1.6;
-    const newWidths = dragRef.current.startWidths.slice();
+    // Width — a clay "pull" centered on the grabbed band, falling off to its
+    // neighbors with a Gaussian so the wall bulges smoothly like real clay
+    // being drawn up, instead of one band kinking out on its own.
+    const wPull = (totalDx / PREVIEW_SIZE) * 2.0 * wGain;
+    const sigma = Math.max(0.75, (startBands - 1) * 0.4);
+    const twoSigSq = 2 * sigma * sigma;
+    const newWidths = startWidths.map((w, i) => {
+      const influence = Math.exp(-((i - active) ** 2) / twoSigSq);
+      // Floor at 0.06 so the pot never pinches to a vanishing thread.
+      return Math.max(0.06, Math.min(1, w + wPull * influence));
+    });
 
-    const prevBands = bandsForHeight(dragRef.current.startH);
-    const newBands = bandsForHeight(newH);
-    let adjustedWidths: number[];
-    let adjustedEdges: number[];
-    if (newBands !== prevBands) {
-      adjustedWidths = resampleWidths(newWidths, newBands);
-      // Keep uniform edge value when resampling
-      const edgeVal = edges[0] ?? 0;
-      adjustedEdges = Array(newBands).fill(edgeVal);
-    } else {
-      adjustedWidths = newWidths;
-      adjustedEdges  = edges;
-    }
-
-    const newBandIdx = Math.round(
-      (dragRef.current.activeBandIndex / Math.max(1, prevBands - 1)) *
-        Math.max(1, newBands - 1)
-    );
-    const clampedIdx = Math.max(0, Math.min(newBands - 1, newBandIdx));
-    adjustedWidths[clampedIdx] = Math.max(
-      0,
-      Math.min(1, (adjustedWidths[clampedIdx] ?? 0.5) + wDelta)
-    );
-
-    onHeightChange(newH);
-    onWidthsChange(adjustedWidths);
-    if (newBands !== prevBands) {
-      onEdgesChange(adjustedEdges);
-    }
+    // Set height + widths together at a FIXED band count — no mid-drag
+    // resampling, which is what used to make the height drag jump.
+    onSculpt(newH, newWidths);
   }
 
   function handlePointerUp() {
     if (!dragRef.current.active) return;
-    // Tapping does nothing special — just end the gesture
+    const didDrag = dragRef.current.hasDragged;
     dragRef.current.active = false;
     dragRef.current.hasDragged = false;
     setIsDragging(false);
+    // Settle the band count to the final height's natural value once, on release.
+    if (didDrag) onSculptEnd();
   }
 
   function handlePointerCancel() {
@@ -1322,21 +1318,26 @@ export default function AvatarBuilder({
   const [classicShape, setClassicShape] = useState<string>(defaultShape as string);
   const [classicOpen, setClassicOpen] = useState(false);
 
-  // Handle height changes — resampling widths AND edges if band count changes.
-  // Edges stay uniform: keep the same single value for all bands.
-  function handleHeightChange(newH: number) {
-    const prevBands = bandsForHeight(thrown2H);
-    const newBands = bandsForHeight(newH);
+  // Live sculpt during an active wheel drag: set height + widths together
+  // WITHOUT changing the band count, so the drag stays fluid (the old
+  // resample-on-threshold behaviour is what made height dragging jump).
+  // buildThrown2Path renders whatever band count the widths array carries,
+  // so the pot looks right even when widths.length ≠ bandsForHeight(h).
+  function handleSculpt(newH: number, newWidths: number[]) {
     setThrown2H(newH);
-    if (newBands !== prevBands) {
-      setThrown2Widths((prev) => resampleWidths(prev, newBands));
-      // Preserve the whole-pot edge value (all bands equal)
-      setEdges((prev) => Array(newBands).fill(prev[0] ?? 0));
-    }
+    setThrown2Widths(newWidths);
+    setEdges((prev) =>
+      prev.length === newWidths.length
+        ? prev
+        : Array(newWidths.length).fill(prev[0] ?? 0)
+    );
   }
 
-  function handleWidthsChange(newWidths: number[]) {
-    setThrown2Widths(newWidths);
+  // On drag release, settle the band count to the height's natural value.
+  function handleSculptEnd() {
+    const nb = bandsForHeight(thrown2H);
+    setThrown2Widths((prev) => (prev.length === nb ? prev : resampleWidths(prev, nb)));
+    setEdges((prev) => (prev.length === nb ? prev : Array(nb).fill(prev[0] ?? 0)));
   }
 
   function handleEdgesChange(newEdges: number[]) {
@@ -1398,8 +1399,8 @@ export default function AvatarBuilder({
             pattern={pattern}
             face={face}
             edges={edges}
-            onHeightChange={handleHeightChange}
-            onWidthsChange={handleWidthsChange}
+            onSculpt={handleSculpt}
+            onSculptEnd={handleSculptEnd}
             onEdgesChange={handleEdgesChange}
           />
 
