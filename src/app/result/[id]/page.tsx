@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ARCHETYPES, readVase } from "@/lib/personality";
 import { buildPotPlaylist, type PlaylistTrack } from "@/lib/playlist";
+import { buildAuthorizeUrl } from "@/lib/spotify";
 import VaseAvatar from "@/components/avatar/VaseAvatar";
 import WobblyCard from "@/components/ui/WobblyCard";
 import HandInput from "@/components/ui/HandInput";
@@ -57,10 +58,13 @@ export async function generateMetadata({
 
 export default async function ResultPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ spotify?: string; playlist?: string }>;
 }) {
   const { id } = await params;
+  const { spotify: spotifyStatus, playlist: addedPlaylistId } = await searchParams;
 
   const rows = await db
     .select()
@@ -116,6 +120,11 @@ export default async function ResultPage({
 
   const hasTracks    = !hasOverride && tracks.length > 0;
   const firstTracked = tracks.find((t) => t.spotifyId !== null) ?? null;
+
+  // "Add to Spotify": let each visitor save this pot's tracks to THEIR own
+  // account. Only offered when we have real track IDs and OAuth is configured.
+  const hasSavableTracks = tracks.some((t) => t.spotifyId !== null);
+  const spotifyAuthUrl = hasSavableTracks ? buildAuthorizeUrl(id) : null;
 
   return (
     <main
@@ -240,6 +249,55 @@ export default async function ResultPage({
             {pot.reading}
           </p>
         </WobblyCard>
+
+        {/* ── Add-to-Spotify result banner ──────────────────────────── */}
+        {spotifyStatus === "added" && (
+          <div
+            className="mb-3"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              padding: "0.6rem 0.8rem",
+              borderRadius: 12,
+              background: "rgba(29,185,84,0.14)",
+              border: "1.5px solid #1DB954",
+              fontFamily: "var(--font-body)",
+              fontSize: "0.92rem",
+              color: "var(--color-clay-ink)",
+            }}
+          >
+            <span>✓ saved to your Spotify —</span>
+            {addedPlaylistId && (
+              <a
+                href={`https://open.spotify.com/playlist/${addedPlaylistId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: "#0b6b32", fontWeight: 700, textDecoration: "underline" }}
+              >
+                open playlist
+              </a>
+            )}
+          </div>
+        )}
+        {(spotifyStatus === "denied" || spotifyStatus === "error") && (
+          <div
+            className="mb-3"
+            style={{
+              padding: "0.6rem 0.8rem",
+              borderRadius: 12,
+              background: "rgba(44,24,16,0.05)",
+              border: "1.5px solid var(--color-clay-ink-muted)",
+              fontFamily: "var(--font-body)",
+              fontSize: "0.92rem",
+              color: "var(--color-clay-ink-muted)",
+            }}
+          >
+            {spotifyStatus === "denied"
+              ? "Spotify sign-in was cancelled — your playlist is still here whenever you want it."
+              : "Couldn't reach Spotify just then. Give it another try."}
+          </div>
+        )}
 
         {/* ── Spotify section ────────────────────────────────────────── */}
         {hasOverride ? (
@@ -403,6 +461,32 @@ export default async function ResultPage({
                 );
               })}
             </ol>
+
+            {/* Add to Spotify — creates this playlist in the visitor's own account */}
+            {spotifyAuthUrl && (
+              <a
+                href={spotifyAuthUrl}
+                style={{
+                  marginTop: "0.9rem",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  padding: "0.5rem 0.9rem",
+                  borderRadius: 999,
+                  background: "#1DB954",
+                  border: "1.5px solid var(--color-clay-ink)",
+                  color: "#0b2e18",
+                  fontFamily: "var(--font-hand)",
+                  fontSize: "1rem",
+                  fontWeight: 700,
+                  textDecoration: "none",
+                  boxShadow: "2px 2px 0 var(--color-clay-ink)",
+                }}
+              >
+                <DoodleIcon name="moon" size={16} color="#0b2e18" />
+                add to my Spotify
+              </a>
+            )}
           </WobblyCard>
         ) : (
           /* ── No custom tracks yet (keys unset or generation failed) ─── */
