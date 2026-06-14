@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ARCHETYPES } from "@/lib/personality";
 import type { PlaylistTrack } from "@/lib/playlist";
-import { exchangeCodeForToken, createUserPlaylist } from "@/lib/spotify";
+import { exchangeCodeForToken, createUserPlaylist, spotifyRedirectUri } from "@/lib/spotify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +23,10 @@ function back(origin: string, potId: string | null, status: string, playlistId?:
 
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const origin = url.origin;
+  // Behind the reverse proxy, req.url's origin is the internal container address
+  // (e.g. http://<container>:3000). Use the public origin from the registered
+  // redirect URI so post-login redirects land on the real site.
+  const origin = new URL(spotifyRedirectUri()).origin;
   const code  = url.searchParams.get("code");
   const error = url.searchParams.get("error");
   const potId = url.searchParams.get("state"); // we set state = pot id
