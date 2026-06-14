@@ -120,6 +120,8 @@ export interface VaseSignals {
    * Preset names → their id; "draw:..." strings → "drawn"; missing/unknown → "none".
    */
   faceKind: "none" | "happy" | "sleepy" | "winky" | "surprised" | "drawn";
+  /** Raw normalised band widths (0-1) from the thrown2 encoding, in order foot→lip. Empty if not a thrown2 pot. */
+  widths: number[];
 }
 
 const KNOWN_FACES = new Set(["none", "happy", "sleepy", "winky", "surprised"]);
@@ -145,6 +147,7 @@ export function extractSignals(shape: string, glaze: string, pattern: string): V
   let edgeMix      = 0;
   let edgeVariance = 0;
   let faceKind: VaseSignals["faceKind"] = "none";
+  let widths: number[] = [];
 
   if (shape.startsWith("thrown2:")) {
     const rest = shape.slice("thrown2:".length);
@@ -168,6 +171,7 @@ export function extractSignals(shape: string, glaze: string, pattern: string): V
         .filter((n) => !isNaN(n))
         .map((n) => Math.max(0, Math.min(1, n)));
       if (ws.length >= 2) {
+        widths = ws;
         bandCount = ws.length;
         // Normalised stdev: raw stdev lives in [0, ~0.5]; cap at 0.5 and scale to 1.
         widthVariance = Math.min(stdev(ws) / 0.5, 1);
@@ -232,7 +236,160 @@ export function extractSignals(shape: string, glaze: string, pattern: string): V
     glazeRaw: glaze,
     pattern: patternStyle,
     faceKind,
+    widths,
   };
+}
+
+// ── Vase description for LLM ─────────────────────────────────────────────
+
+/**
+ * Turns the signals from a thrown vase into one compact, factual paragraph of
+ * raw material for the LLM.  NOT the final reading — neutral description only.
+ * Deterministic: no Math.random, no side effects.
+ */
+export function describeVaseForReading(signals: VaseSignals): string {
+  const parts: string[] = [];
+
+  // 1. Proportion
+  if (signals.height >= 0.72) {
+    parts.push("tall and narrow, reaching well above its width");
+  } else if (signals.height <= 0.35) {
+    parts.push("squat and low, wider than it is tall");
+  } else {
+    parts.push("medium, fairly balanced height");
+  }
+
+  // 2. Where it's widest
+  if (signals.bellyBias <= 0.25) {
+    parts.push("widest at the foot, tapering upward");
+  } else if (signals.bellyBias >= 0.75) {
+    parts.push("flares widest at the lip, top-heavy");
+  } else {
+    parts.push("bulges at the belly, mid-height");
+  }
+
+  // 3. Curve drama
+  if (signals.widthVariance >= 0.4) {
+    parts.push("walls swing dramatically in and out");
+  } else if (signals.widthVariance <= 0.1) {
+    parts.push("nearly straight, even walls");
+  } else {
+    parts.push("a gentle curve");
+  }
+
+  // 4. Oddity hook — only when we have the raw widths
+  if (signals.widths.length >= 2) {
+    const ws = signals.widths;
+    const mean = ws.reduce((a, b) => a + b, 0) / ws.length;
+    let maxDev = 0;
+    let maxIdx = 0;
+    for (let i = 0; i < ws.length; i++) {
+      const dev = Math.abs(ws[i] - mean);
+      if (dev > maxDev) { maxDev = dev; maxIdx = i; }
+    }
+
+    if (maxDev < 0.06) {
+      parts.push("thrown evenly, almost suspiciously symmetrical");
+    } else {
+      const outlierPos = maxIdx / (ws.length - 1); // 0=foot, 1=lip
+      const outlierVal = ws[maxIdx];
+      const lip  = ws[ws.length - 1];
+      const base = ws[0];
+
+      // Check if it's an interior pinch (not first or last band)
+      const isInterior = maxIdx > 0 && maxIdx < ws.length - 1;
+      if (isInterior && outlierVal < mean - 0.06) {
+        // Pinched-in waist — describe position
+        const posLabel = outlierPos <= 0.4 ? "low" : outlierPos >= 0.7 ? "high" : "mid";
+        parts.push(`a pinched-in waist about ${posLabel} up`);
+      } else if (lip - base > 0.12) {
+        parts.push("an oddly wide, flared lip");
+      } else if (base - lip > 0.12) {
+        parts.push("a heavy, planted base and a tight mouth");
+      } else {
+        // Generic outlier — describe using same position label
+        const posLabel = outlierPos <= 0.33 ? "low" : outlierPos >= 0.66 ? "high" : "mid";
+        parts.push(`an uneven bulge ${posLabel} up`);
+      }
+    }
+  }
+
+  // 5. Edge character
+  if (signals.edgeMix >= 0.7) {
+    parts.push("crisp, angular walls");
+  } else if (signals.edgeMix <= 0.25) {
+    parts.push("soft and rounded throughout");
+  } else if (signals.edgeVariance >= 0.2) {
+    parts.push("mixed walls, some sharp and some soft");
+  } else {
+    parts.push("subtly shaped walls");
+  }
+
+  // 6. Glaze — preset name + HSL mood
+  const PRESET_NAMES: Record<string, string> = {
+    terracotta:    "terracotta",
+    celadon:       "celadon green",
+    cobalt:        "cobalt blue",
+    ivory:         "ivory",
+    "sage-matte":  "sage",
+    "blush-gloss": "blush",
+    midnight:      "midnight blue",
+    honey:         "honey",
+  };
+
+  let glazeColour: string;
+  if (PRESET_NAMES[signals.glazeRaw]) {
+    glazeColour = PRESET_NAMES[signals.glazeRaw];
+  } else {
+    // Derive colour word from hue
+    const { hue } = signals;
+    if (hue <= 60 || hue >= 300) {
+      glazeColour = "warm-toned";
+    } else if (hue <= 150) {
+      glazeColour = "green";
+    } else if (hue <= 270) {
+      glazeColour = "cool blue";
+    } else {
+      glazeColour = "violet";
+    }
+  }
+
+  let glazeMood: string;
+  if (signals.light < 0.35) {
+    glazeMood = "dark, light-swallowing";
+  } else if (signals.light > 0.7) {
+    glazeMood = "pale, washed-out";
+  } else if (signals.sat > 0.6) {
+    glazeMood = "saturated, vivid";
+  } else {
+    glazeMood = "muted";
+  }
+
+  parts.push(`a ${glazeMood} ${glazeColour} glaze`);
+
+  // 7. Pattern
+  const PATTERN_DESC: Record<string, string> = {
+    plain:    "left undecorated",
+    stripes:  "banded with stripes",
+    dots:     "scattered with dots",
+    squiggle: "marked with a loose squiggle",
+    flowers:  "dotted with small flowers",
+    draw:     "covered in hand-scrawled marks",
+  };
+  parts.push(PATTERN_DESC[signals.pattern] ?? "left undecorated");
+
+  // 8. Face
+  const FACE_DESC: Record<string, string> = {
+    none:      "no face — blank",
+    happy:     "a small smiling face",
+    sleepy:    "a drowsy half-closed face",
+    winky:     "a single winking eye",
+    surprised: "a wide-eyed, startled face",
+    drawn:     "a hand-drawn face",
+  };
+  parts.push(FACE_DESC[signals.faceKind] ?? "no face — blank");
+
+  return parts.join("; ") + ".";
 }
 
 // ── Archetype definitions ─────────────────────────────────────────────────
@@ -310,9 +467,9 @@ export const ARCHETYPES: Archetype[] = [
     emoji: "🌱",
     iconName: "sprout",
     blurb:
-      "You're someone who takes your time and means it — rushing has never made anything worth keeping. " +
-      "People underestimate you at first, but they remember you long after the flashier ones have faded. " +
-      "Your steadiest growth happens quietly, in the background, like roots finding water.",
+      "You have a note in your phone from eight months ago that you haven't deleted and haven't acted on. " +
+      "People who met you briefly still bring you up in conversations you weren't part of. " +
+      "Things take longer with you than anyone expects, and they tend to last.",
     // Spotify "Peaceful Piano" — calm, patient, unhurried
     playlistId: "37i9dQZF1DX6ziVCJnEm59", // your favorite coffeehouse
     playlistName: "Peaceful Piano",
@@ -348,9 +505,9 @@ export const ARCHETYPES: Archetype[] = [
     emoji: "🔥",
     iconName: "flame",
     blurb:
-      "You take up space and you're not apologising for it — the world is bigger when you're in it. " +
-      "You have opinions, you share them, and somehow you make people feel included rather than steamrolled. " +
-      "There's a fire in you that other people warm themselves on.",
+      "You walk into a room and the air pressure changes slightly. " +
+      "You have started arguments you didn't mean to start and won some you didn't want to. " +
+      "There is a volume inside you that other people spend their lives searching for.",
     // Spotify "Mood Booster" — energetic, confident
     playlistId: "37i9dQZF1DXcF6B6QPhFDv", // Rock This
     playlistName: "Mood Booster",
@@ -386,9 +543,9 @@ export const ARCHETYPES: Archetype[] = [
     emoji: "🌙",
     iconName: "moon",
     blurb:
-      "You hold things — memories, secrets, feelings — with more care than most people realise. " +
-      "Quiet doesn't mean absent; you notice everything and forget almost nothing. " +
-      "The people who know you well consider themselves lucky.",
+      "You remember the exact shirt someone was wearing the first time you met them. " +
+      "You have let things go unchallenged in the moment and catalogued them precisely afterward. " +
+      "People tell you things in parking lots they have never said aloud before.",
     // Spotify "lofi beats" — quiet, introspective
     playlistId: "37i9dQZF1DWYcDQ1hSjOpY", // Deep Sleep
     playlistName: "lofi beats",
@@ -425,9 +582,9 @@ export const ARCHETYPES: Archetype[] = [
     emoji: "🌀",
     iconName: "swirl",
     blurb:
-      "You're the person who suggests something impulsive and somehow makes everyone glad they said yes. " +
-      "Plans are a starting point at best; you find your best ideas mid-spin. " +
-      "Life is more fun because you're in it — even when it's a little chaotic.",
+      "You have rerouted mid-sentence more times than anyone in the room has noticed. " +
+      "Your best decisions have been made while already moving. " +
+      "You leave marks on places that don't remember your name.",
     // Spotify "Indie Pop" — eclectic, kinetic
     playlistId: "37i9dQZF1DWWBHeXOYZf74", // POLLEN
     playlistName: "Indie Pop",
@@ -464,9 +621,9 @@ export const ARCHETYPES: Archetype[] = [
     emoji: "☀️",
     iconName: "sun",
     blurb:
-      "You genuinely believe things will work out, and weirdly, they usually do. " +
-      "People call it luck, but it's mostly that you keep showing up with an open hand. " +
-      "Your kind of hope isn't naive — it's practised.",
+      "You make plans in the morning and by noon something has changed and you don't mind. " +
+      "People clock your face first when something goes wrong in the room. " +
+      "You have held a good mood through things that would have flattened someone else.",
     // Spotify "Feelin' Good" — upbeat, warm
     playlistId: "37i9dQZF1DXdPec7aLTmlC", // Happy Hits!
     playlistName: "Feelin' Good",
@@ -502,9 +659,9 @@ export const ARCHETYPES: Archetype[] = [
     emoji: "🌊",
     iconName: "ocean",
     blurb:
-      "There's more to you than almost anyone has found the bottom of — and you like it that way. " +
-      "You think in layers, feel in depths, and occasionally surprise even yourself with what surfaces. " +
-      "People come to you when they need something real.",
+      "You have a thought about something most people don't think about at all, and you have had it for years. " +
+      "Conversations with you take longer than they were supposed to. " +
+      "Something surfaces in you occasionally that you can't entirely account for.",
     // Spotify "Deep Focus" — deep, layered, sustained
     playlistId: "37i9dQZF1DWZqd5JICZI0u", // Cinematic Chill Out
     playlistName: "Deep Focus",
@@ -540,9 +697,9 @@ export const ARCHETYPES: Archetype[] = [
     emoji: "🌸",
     iconName: "blossom",
     blurb:
-      "You feel things the way some people feel weather — fully, in your whole body. " +
-      "That sensitivity isn't a flaw; it's how you catch the things everyone else walks past. " +
-      "You make space for people in a way they remember for years.",
+      "You notice when someone's voice changes by a single register and you don't say anything about it. " +
+      "You have cried at something you couldn't explain to anyone who wasn't there. " +
+      "People leave conversations with you having said more than they intended.",
     // Spotify "Chill Vibes" — warm, gentle, open
     playlistId: "37i9dQZF1DWTwnEm1IYyoj", // Soft Pop Hits
     playlistName: "Chill Vibes",
@@ -578,9 +735,9 @@ export const ARCHETYPES: Archetype[] = [
     emoji: "🪨",
     iconName: "stone",
     blurb:
-      "You're the one people call when things go sideways — not because you have all the answers, " +
-      "but because you don't panic. There's a particular kind of strength in being someone others can " +
-      "rely on, and you've been quietly building it your whole life.",
+      "You are the person who checks whether the door is locked before anyone else remembers to ask. " +
+      "You have absorbed someone else's crisis and handled it so cleanly they still don't know how bad it was. " +
+      "Your name comes up in rooms you have already left.",
     // Spotify "Jazz Vibes" — steady, reliable, timeless groove
     playlistId: "37i9dQZF1DXbITWG1ZJKYt", // Jazz in the Background
     playlistName: "Jazz Vibes",
@@ -617,9 +774,9 @@ export const ARCHETYPES: Archetype[] = [
     emoji: "🪁",
     iconName: "kite",
     blurb:
-      "You follow what lights you up, and somehow that's enough of a plan. " +
-      "Constraints make you creative — you find the gap, the workaround, the left-field option " +
-      "everyone else overlooked. The world needs more people who refuse to be boxed in.",
+      "You have taken a route no one recommended and arrived somewhere worth being. " +
+      "There is a category of object in your home that no one else would think to keep. " +
+      "You change direction without announcing it and people catch up or they don't.",
     // Spotify "Indie Pop" — free-ranging, adventurous
     playlistId: "37i9dQZF1DWYV7OOaGhoH0", // Roots Rising
     playlistName: "Indie Pop",
@@ -656,9 +813,9 @@ export const ARCHETYPES: Archetype[] = [
     emoji: "🍂",
     iconName: "leaf",
     blurb:
-      "You've always felt slightly out of step with whatever era you were born into — and you've " +
-      "made peace with that. You're drawn to things that last: slow meals, long conversations, " +
-      "objects made with care. People talk to you for a few minutes and feel inexplicably better.",
+      "You own something old that you did not inherit and have never been able to fully explain. " +
+      "You have sat with something uncomfortable long enough that it became familiar. " +
+      "People your age have not caught up to the thing you already know.",
     // Spotify "Sad Songs" — reflective, autumnal, deeply felt
     playlistId: "37i9dQZF1DWWzBc3TOlaAV", // Soul Coffee
     playlistName: "Sad Songs",
@@ -853,6 +1010,8 @@ function traitPhrases(signals: VaseSignals, throwScore?: number): string[] {
 export interface VaseReading {
   archetype: Archetype;
   traits: string[];
+  /** Compact factual description of the pot, used as LLM context for the reading. */
+  description: string;
 }
 
 /**
@@ -894,7 +1053,11 @@ export function vaseToArchetype(signals: VaseSignals, throwScore?: number): Vase
     }
   }
 
-  return { archetype: best, traits: traitPhrases(signals, safeThrowScore) };
+  return {
+    archetype: best,
+    traits: traitPhrases(signals, safeThrowScore),
+    description: describeVaseForReading(signals),
+  };
 }
 
 /**

@@ -22,14 +22,22 @@ function getClient(): OpenAI {
 
 // ── System prompt ─────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are the Clay Oracle — a warm, witty pottery-reader who divines personality from the shape, glaze, and decoration of handmade vessels. You write short, bespoke personality readings in second person.
+const SYSTEM_PROMPT = `You are the Clay Oracle. You read a person from the pot they threw — its exact proportions, glaze, marks, and face — and you state, plainly, what you see about them. You are not a fortune-teller and not a cheerleader.
+
+Voice:
+- Cool, neutral, observational. You simply know things. No warmth, no reassurance, no compliments, no advice.
+- Uncannily specific. Name oddly precise habits, objects, rooms, times of day, small recurring moments — the kind of detail that makes a person feel watched. Avoid abstractions like "you are creative" or "you are kind".
+- Every sentence points at something concrete and particular, never a personality category.
 
 Rules:
-- Write exactly 2-3 sentences.
-- Reference the SPECIFIC traits given — make the reading feel tailor-made, not generic.
-- Warm and encouraging; cosy and specific; never a generic horoscope platitude.
-- No preamble, no "Based on your vase..." opener — dive straight in.
-- End on a hopeful or affirming note.`;
+- Write 3-4 short sentences, second person.
+- Read the SPECIFIC pot details given. Let the odd feature of the pot become an odd, specific human detail.
+- Do not mention pottery, clay, glaze, vases, or the pot itself. Do not name the archetype. No preamble.
+- Banned words: cosy, warm, hopeful, journey, energy, vibe, soul, embrace, shine, radiant, gift, bloom.
+- End on a flat observation, not an affirmation. Do not wish them well.
+
+Example (for register only — never reuse these lines):
+You keep a drawer that doesn't shut all the way and you stopped fighting it months ago. Every plan you make has a backup you never use. You leave parties without saying goodbye, then text from the car. You will read this twice and only believe the parts that sting.`;
 
 // ── Public API ────────────────────────────────────────────────────────────
 
@@ -42,7 +50,8 @@ Rules:
  */
 export async function generateReading(
   traits: string[],
-  archetype: Archetype
+  archetype: Archetype,
+  description?: string
 ): Promise<string> {
   // Fast-path: no API key configured.
   const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -51,7 +60,7 @@ export async function generateReading(
   }
 
   const model = process.env.LLM_MODEL ?? "deepseek-chat";
-  const userMessage = `Archetype: "${archetype.name} ${archetype.emoji}"\nTraits: ${traits.join(", ")}`;
+  const userMessage = `Archetype (internal label, never mention it): "${archetype.name}"\nPot: ${description ?? traits.join(", ")}\nTrait tags: ${traits.join(", ")}`;
 
   try {
     const controller = new AbortController();
@@ -66,8 +75,8 @@ export async function generateReading(
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user",   content: userMessage },
           ],
-          temperature:  0.9,
-          max_tokens:   160,
+          temperature:  1.05,
+          max_tokens:   200,
         },
         { signal: controller.signal }
       );

@@ -72,9 +72,9 @@ export async function readPotAction(formData: FormData): Promise<void> {
   const pattern = canonPattern(rawPattern);
 
   // Personality + reading + playlist (run concurrently for speed)
-  const { archetype, traits } = readVase(shape, glaze, pattern);
+  const { archetype, traits, description } = readVase(shape, glaze, pattern);
   const [reading, tracks] = await Promise.all([
-    generateReading(traits, archetype),
+    generateReading(traits, archetype, description),
     buildPotPlaylist(traits, archetype),
   ]);
 
