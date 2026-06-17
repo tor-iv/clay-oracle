@@ -274,10 +274,36 @@ export function parseEdge(raw: string | undefined): number {
   return isNaN(num) ? 0 : clamp01(num);
 }
 
+/**
+ * Optional manual adjustment of the face on a thrown2 pot.
+ *   s = size multiplier (1 = auto-fit default), x/y = offset in viewBox units
+ *   (0 = centered on the body), a = aspect/stretch (0 = round, + = wider, − = taller).
+ */
+export interface FaceTransform {
+  s: number;
+  x: number;
+  y: number;
+  a: number;
+}
+
+export const DEFAULT_FACE_TRANSFORM: FaceTransform = { s: 1, x: 0, y: 0, a: 0 };
+
+/** Clamp a parsed face-transform into safe ranges. */
+export function clampFaceTransform(t: Partial<FaceTransform>): FaceTransform {
+  const clamp = (v: number, lo: number, hi: number, dflt: number) =>
+    isNaN(v) ? dflt : Math.max(lo, Math.min(hi, v));
+  return {
+    s: clamp(t.s ?? 1, 0.5, 1.8, 1),
+    x: clamp(t.x ?? 0, -12, 12, 0),
+    y: clamp(t.y ?? 0, -14, 14, 0),
+    a: clamp(t.a ?? 0, -0.35, 0.35, 0),
+  };
+}
+
 export type ParsedShape =
   | { kind: "preset"; id: PresetShapeId }
   | { kind: "thrown"; params: ThrownParams; face: FaceId }
-  | { kind: "thrown2"; h: number; widths: number[]; face: FaceId; edges: number[]; wobble: number };
+  | { kind: "thrown2"; h: number; widths: number[]; face: FaceId; edges: number[]; wobble: number; faceT: FaceTransform };
 
 /** Parse an avatar_shape string to either a preset or thrown shape. */
 export function parseShape(shape: string): ParsedShape {
@@ -426,7 +452,15 @@ export function parseShape(shape: string): ParsedShape {
         ? clamp01(parseFloat(rawWobble) || 0)
         : 0;
 
-      return { kind: "thrown2", h, widths, face: face as FaceId, edges, wobble };
+      // Parse optional manual face transform (size/shape/location).
+      const faceT = clampFaceTransform({
+        s: parts["fs"] !== undefined ? parseFloat(parts["fs"]) : 1,
+        x: parts["fx"] !== undefined ? parseFloat(parts["fx"]) : 0,
+        y: parts["fy"] !== undefined ? parseFloat(parts["fy"]) : 0,
+        a: parts["fa"] !== undefined ? parseFloat(parts["fa"]) : 0,
+      });
+
+      return { kind: "thrown2", h, widths, face: face as FaceId, edges, wobble, faceT };
     } catch {
       return { kind: "preset", id: DEFAULT_AVATAR.shape as PresetShapeId };
     }
@@ -443,7 +477,7 @@ export function canonicalizeShape(shape: string): string {
     return parsed.id;
   }
   if (parsed.kind === "thrown2") {
-    return encodeThrown2Shape(parsed.h, parsed.widths, parsed.face, parsed.edges, parsed.wobble);
+    return encodeThrown2Shape(parsed.h, parsed.widths, parsed.face, parsed.edges, parsed.wobble, parsed.faceT);
   }
   return encodeThrownShape(parsed.params, parsed.face);
 }
@@ -478,7 +512,8 @@ export function encodeThrown2Shape(
   widths: number[],
   face: FaceId | string,
   edges: number[] | number = 0,
-  wobble = 0
+  wobble = 0,
+  faceT?: FaceTransform
 ): string {
   const hStr = clamp01(h).toFixed(3);
   const wStr = widths.map((w) => clamp01(w).toFixed(3)).join(",");
@@ -497,13 +532,22 @@ export function encodeThrown2Shape(
   }
   const edgeStr = edgeArr.map((e) => e.toFixed(2)).join(",");
 
-  const base = `thrown2:h=${hStr};w=${wStr};edge=${edgeStr};face=${faceStr}`;
+  let out = `thrown2:h=${hStr};w=${wStr};edge=${edgeStr};face=${faceStr}`;
   // Only encode wobble when non-zero (backward-compatible: old parsers ignore unknown segments)
   const wobbleClamped = clamp01(wobble);
   if (wobbleClamped > 0.001) {
-    return `${base};wobble=${wobbleClamped.toFixed(3)}`;
+    out += `;wobble=${wobbleClamped.toFixed(3)}`;
   }
-  return base;
+  // Append manual face transform segments only when they deviate from default,
+  // keeping default strings short and old parsers happy (they skip unknown keys).
+  if (faceT) {
+    const t = clampFaceTransform(faceT);
+    if (Math.abs(t.s - 1) > 0.001) out += `;fs=${t.s.toFixed(2)}`;
+    if (Math.abs(t.x) > 0.001)     out += `;fx=${t.x.toFixed(2)}`;
+    if (Math.abs(t.y) > 0.001)     out += `;fy=${t.y.toFixed(2)}`;
+    if (Math.abs(t.a) > 0.001)     out += `;fa=${t.a.toFixed(3)}`;
+  }
+  return out;
 }
 
 /**

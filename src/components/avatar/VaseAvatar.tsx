@@ -11,6 +11,7 @@ import {
   parseMiiFace,
   parsePattern,
   parseDecorationDrawing,
+  DEFAULT_FACE_TRANSFORM,
 } from "@/lib/avatars";
 import type { AvatarShape, AvatarGlaze, AvatarPattern, FaceId, ThrownParams } from "@/lib/avatars";
 import {
@@ -479,15 +480,28 @@ export default function VaseAvatar({
   }
 
   // Face position
-  const { cx: faceCx, cy: faceCy, scale: faceScale } = getFacePosition(
+  const facePos = getFacePosition(
     parsed.kind,
     vasePath,
     isThrownShape ? parsed.params : undefined,
     isThrown2Shape ? { h: parsed.h, widths: parsed.widths } : undefined
   );
 
+  // Manual face adjustment (size / location / stretch), thrown2 only.
+  const faceT = isThrown2Shape ? parsed.faceT : DEFAULT_FACE_TRANSFORM;
+  const faceCx = facePos.cx + faceT.x;
+  const faceCy = facePos.cy + faceT.y;
+
   // Scale the face rendering (faces are designed at scale=1 for ~64px, so adjust)
-  const faceSizeScale = (size / 64) * faceScale;
+  const faceSizeScale = (size / 64) * facePos.scale * faceT.s;
+
+  // Aspect/stretch: scale the whole face group non-uniformly around its centre.
+  const faceAspectX = 1 + faceT.a;
+  const faceAspectY = 1 - faceT.a;
+  const faceAspectTransform =
+    Math.abs(faceT.a) > 0.001
+      ? `translate(${faceCx} ${faceCy}) scale(${faceAspectX} ${faceAspectY}) translate(${-faceCx} ${-faceCy})`
+      : undefined;
 
   // Decoration draw strokes (pattern === "draw:...")
   const decorationStrokes =
@@ -633,12 +647,14 @@ export default function VaseAvatar({
 
       {/* ── Face overlay (only for thrown vases with a face) ── */}
       {face !== "none" && (
-        <FaceOverlay
-          face={face}
-          cx={faceCx}
-          cy={faceCy}
-          scale={faceSizeScale}
-        />
+        <g transform={faceAspectTransform}>
+          <FaceOverlay
+            face={face}
+            cx={faceCx}
+            cy={faceCy}
+            scale={faceSizeScale}
+          />
+        </g>
       )}
 
       {/* ── Ink outline: hand-drawn feel ── */}

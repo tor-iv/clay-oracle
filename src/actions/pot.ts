@@ -30,7 +30,7 @@ function canonShape(raw: string): string {
   const parsed = parseShape(raw);
   if (parsed.kind === "preset") return parsed.id;
   if (parsed.kind === "thrown2") {
-    return encodeThrown2Shape(parsed.h, parsed.widths, parsed.face, parsed.edges);
+    return encodeThrown2Shape(parsed.h, parsed.widths, parsed.face, parsed.edges, parsed.wobble, parsed.faceT);
   }
   if (parsed.kind === "thrown") {
     return encodeThrownShape(parsed.params, parsed.face);

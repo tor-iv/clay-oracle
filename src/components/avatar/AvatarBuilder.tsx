@@ -28,6 +28,7 @@ import {
   resolveGlaze,
   parsePattern,
   encodePattern,
+  DEFAULT_FACE_TRANSFORM,
 } from "@/lib/avatars";
 import type {
   AvatarShape,
@@ -36,6 +37,7 @@ import type {
   AvatarPatternStyle,
   FaceId,
   MiiFace,
+  FaceTransform,
 } from "@/lib/avatars";
 import {
   EYE_PARTS,
@@ -217,6 +219,7 @@ interface WheelVasePreviewProps {
   pattern: string;
   face: FaceId | string;
   edges: number[];
+  faceT: FaceTransform;
   /** Live sculpt during a drag: set height + widths together, no band-count resample. */
   onSculpt: (h: number, widths: number[]) => void;
   /** Drag released: settle the band count to the height's natural value. */
@@ -231,6 +234,7 @@ function WheelVasePreview({
   pattern,
   face,
   edges,
+  faceT,
   onSculpt,
   onSculptEnd,
   onEdgesChange,
@@ -366,7 +370,7 @@ function WheelVasePreview({
   }
 
   const N = widths.length;
-  const shapeStr = encodeThrown2Shape(h, widths, face as FaceId, edges);
+  const shapeStr = encodeThrown2Shape(h, widths, face as FaceId, edges, 0, faceT);
 
   return (
     <div style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
@@ -1296,6 +1300,95 @@ function PatternPicker({
 
 // ── AvatarBuilder (main export) ───────────────────────────────────────────
 
+// ── FaceAdjust: manual size / shape / location sliders ─────────────────────
+
+function FaceSlider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <span style={{ fontFamily: "var(--font-hand)", fontSize: "0.78rem", color: "#5C3D2E" }}>
+        {label}
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        style={{ width: "100%", accentColor: "#B85C2A", cursor: "pointer" }}
+      />
+    </label>
+  );
+}
+
+function FaceAdjust({
+  faceT,
+  onChange,
+}: {
+  faceT: FaceTransform;
+  onChange: (t: FaceTransform) => void;
+}) {
+  const set = (patch: Partial<FaceTransform>) => onChange({ ...faceT, ...patch });
+  const isDefault =
+    faceT.s === 1 && faceT.x === 0 && faceT.y === 0 && faceT.a === 0;
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        padding: "10px 12px",
+        background: "rgba(232,213,176,0.3)",
+        borderRadius: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontFamily: "var(--font-hand)", fontSize: "0.85rem", color: "#2C1810" }}>
+          fine-tune the face
+        </span>
+        {!isDefault && (
+          <button
+            type="button"
+            onClick={() => onChange(DEFAULT_FACE_TRANSFORM)}
+            style={{
+              fontFamily: "var(--font-hand)",
+              fontSize: "0.75rem",
+              color: "#5C3D2E",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              textDecoration: "underline",
+              textDecorationStyle: "dotted",
+            }}
+          >
+            ↺ reset
+          </button>
+        )}
+      </div>
+      <FaceSlider label="size" value={faceT.s} min={0.5} max={1.8} step={0.05} onChange={(v) => set({ s: v })} />
+      <FaceSlider label="shape · tall ↔ wide" value={faceT.a} min={-0.35} max={0.35} step={0.01} onChange={(v) => set({ a: v })} />
+      <FaceSlider label="move · left ↔ right" value={faceT.x} min={-12} max={12} step={0.5} onChange={(v) => set({ x: v })} />
+      <FaceSlider label="move · up ↔ down" value={faceT.y} min={-14} max={14} step={0.5} onChange={(v) => set({ y: v })} />
+    </div>
+  );
+}
+
 export default function AvatarBuilder({
   defaultShape   = DEFAULT_AVATAR.shape,
   defaultGlaze   = DEFAULT_AVATAR.glaze,
@@ -1308,6 +1401,8 @@ export default function AvatarBuilder({
   const [thrown2Widths, setThrown2Widths] = useState<number[]>(DEFAULT_THROWN2_WIDTHS.slice());
   const [face, setFace] = useState<FaceId | string>("happy");
   const [edges, setEdges] = useState<number[]>(() => defaultEdges(bandsForHeight(DEFAULT_THROWN2_H)));
+  // Manual face size / shape / location adjustment.
+  const [faceT, setFaceT] = useState<FaceTransform>(DEFAULT_FACE_TRANSFORM);
 
   // Glaze: can be a preset id or a raw hex
   const [glaze, setGlaze]     = useState<string>(defaultGlaze as string);
@@ -1348,7 +1443,7 @@ export default function AvatarBuilder({
   }
 
   const shapeValue = mode === "throw"
-    ? encodeThrown2Shape(thrown2H, thrown2Widths, face as FaceId, edges)
+    ? encodeThrown2Shape(thrown2H, thrown2Widths, face as FaceId, edges, 0, faceT)
     : classicShape;
 
   function handleSurprise() {
@@ -1359,6 +1454,7 @@ export default function AvatarBuilder({
     setEdges(newEdges.length === newBands ? newEdges : resampleWidths(newEdges, newBands));
     setGlaze(newGlaze);
     setFace(newFace);
+    setFaceT(DEFAULT_FACE_TRANSFORM);
   }
 
   function handleReset() {
@@ -1369,6 +1465,7 @@ export default function AvatarBuilder({
     setEdges(defaultEdges(defaultBands));
     setGlaze(DEFAULT_AVATAR.glaze);
     setPattern("plain");
+    setFaceT(DEFAULT_FACE_TRANSFORM);
   }
 
   function switchToClassic(id: string) {
@@ -1399,6 +1496,7 @@ export default function AvatarBuilder({
             pattern={pattern}
             face={face}
             edges={edges}
+            faceT={faceT}
             onSculpt={handleSculpt}
             onSculptEnd={handleSculptEnd}
             onEdgesChange={handleEdgesChange}
@@ -1509,6 +1607,9 @@ export default function AvatarBuilder({
             glaze={glaze}
             onFaceChange={setFace}
           />
+          {face !== "none" && (
+            <FaceAdjust faceT={faceT} onChange={setFaceT} />
+          )}
         </section>
       )}
 
