@@ -24,6 +24,10 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           fingerprint: ${{ secrets.SSH_HOST_FINGERPRINT }}
+          # The Hetzner box is CPU-constrained; a cold `next build` can take
+          # ~10 min. Default command_timeout is 10m — raise it so the deploy
+          # isn't killed mid-build.
+          command_timeout: 30m
           script: |
             cd /opt/clay-oracle
             git pull origin main
