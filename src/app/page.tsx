@@ -1,6 +1,6 @@
 import AvatarBuilder from "@/components/avatar/AvatarBuilder";
-import InkButton from "@/components/ui/InkButton";
 import DoodleIcon from "@/components/ui/DoodleIcon";
+import SubmitReadingButton from "@/components/SubmitReadingButton";
 import { readPotAction } from "@/actions/pot";
 
 // Sculpt landing — throw a pot, then "read my pot".
@@ -38,10 +38,7 @@ export default function Home() {
         <form action={readPotAction} className="flex flex-col gap-6">
           <AvatarBuilder />
           <div className="flex justify-center">
-            <InkButton type="submit" variant="primary" className="w-full">
-              <DoodleIcon name="sparkle" size={18} color="#F5F0E8" />
-              read my pot
-            </InkButton>
+            <SubmitReadingButton />
           </div>
         </form>
       </div>
